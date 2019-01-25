@@ -1,6 +1,7 @@
-/**
- *  Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.remote
 
 import java.util.concurrent.TimeoutException
@@ -21,7 +22,6 @@ object ActorsLeakSpec {
   val config = ConfigFactory.parseString(
     """
       | akka.actor.provider = remote
-      | #akka.loglevel = DEBUG
       | akka.remote.netty.tcp.applied-adapters = ["trttl"]
       | #akka.remote.log-lifecycle-events = on
       | akka.remote.transport-failure-detector.heartbeat-interval = 1 s
@@ -204,7 +204,7 @@ class ActorsLeakSpec extends AkkaSpec(ActorsLeakSpec.config) with ImplicitSender
 
       EventFilter[TimeoutException](occurrences = 1).intercept {}
 
-      awaitAssert(assertResult(initialActors)(targets.flatMap(collectLiveActors).toSet), 5.seconds)
+      awaitAssert(assertResult(initialActors)(targets.flatMap(collectLiveActors).toSet), 10.seconds)
     }
 
   }

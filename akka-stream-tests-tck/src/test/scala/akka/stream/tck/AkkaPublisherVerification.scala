@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2014-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2014-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.tck
 
 import scala.collection.immutable
@@ -16,7 +17,7 @@ abstract class AkkaPublisherVerification[T](val env: TestEnvironment, publisherS
   with TestNGSuiteLike with ActorSystemLifecycle {
 
   def this(printlnDebug: Boolean) =
-    this(new TestEnvironment(Timeouts.defaultTimeoutMillis, printlnDebug), Timeouts.publisherShutdownTimeoutMillis)
+    this(new TestEnvironment(Timeouts.defaultTimeoutMillis, Timeouts.defaultNoSignalsTimeoutMillis, printlnDebug), Timeouts.publisherShutdownTimeoutMillis)
 
   def this() = this(false)
 

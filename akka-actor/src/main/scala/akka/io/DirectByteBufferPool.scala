@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.io
@@ -9,7 +9,7 @@ import scala.util.control.NonFatal
 
 trait BufferPool {
   def acquire(): ByteBuffer
-  def release(buf: ByteBuffer)
+  def release(buf: ByteBuffer): Unit
 }
 
 /**
@@ -90,9 +90,9 @@ private[akka] object DirectByteBufferPool {
             val cleaner = cleanerMethod.invoke(bb)
             cleanMethod.invoke(cleaner)
           }
-        catch { case NonFatal(e) ⇒ /* ok, best effort attempt to cleanup failed */ }
+        catch { case NonFatal(_) ⇒ /* ok, best effort attempt to cleanup failed */ }
       }
-    } catch { case NonFatal(e) ⇒ _ ⇒ () /* reflection failed, use no-op fallback */ }
+    } catch { case NonFatal(_) ⇒ _ ⇒ () /* reflection failed, use no-op fallback */ }
 
   /**
    * DirectByteBuffers are garbage collected by using a phantom reference and a

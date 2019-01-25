@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.testkit
 
 import language.postfixOps
@@ -46,7 +47,7 @@ class AkkaSpecSpec extends WordSpec with Matchers {
 
     "stop correctly when sending PoisonPill to rootGuardian" in {
       val system = ActorSystem("AkkaSpec2", AkkaSpec.testConf)
-      val spec = new AkkaSpec(system) {}
+      new AkkaSpec(system) {}
       val latch = new TestLatch(1)(system)
       system.registerOnTermination(latch.countDown())
 

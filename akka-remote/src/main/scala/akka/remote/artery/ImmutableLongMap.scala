@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2016-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.remote.artery
 
 import scala.annotation.tailrec
@@ -15,8 +16,6 @@ import akka.util.HashCode
 private[akka] object ImmutableLongMap {
   def empty[A >: Null](implicit t: ClassTag[A]): ImmutableLongMap[A] =
     new ImmutableLongMap(Array.emptyLongArray, Array.empty)
-
-  private val MaxScanLength = 10
 }
 
 /**
@@ -27,7 +26,6 @@ private[akka] object ImmutableLongMap {
  */
 private[akka] class ImmutableLongMap[A >: Null] private (
   private val keys: Array[Long], private val values: Array[A])(implicit t: ClassTag[A]) {
-  import ImmutableLongMap.MaxScanLength
 
   val size: Int = keys.length
 
@@ -59,19 +57,19 @@ private[akka] class ImmutableLongMap[A >: Null] private (
       val i = Arrays.binarySearch(keys, key)
       if (i >= 0) {
         // existing key, replace value
-        val newValues = Array.ofDim[A](values.length)
+        val newValues = new Array[A](values.length)
         System.arraycopy(values, 0, newValues, 0, values.length)
         newValues(i) = value
         new ImmutableLongMap(keys, newValues)
       } else {
         // insert the entry at the right position, and keep the arrays sorted
         val j = -(i + 1)
-        val newKeys = Array.ofDim[Long](size + 1)
+        val newKeys = new Array[Long](size + 1)
         System.arraycopy(keys, 0, newKeys, 0, j)
         newKeys(j) = key
         System.arraycopy(keys, j, newKeys, j + 1, keys.length - j)
 
-        val newValues = Array.ofDim[A](size + 1)
+        val newValues = new Array[A](size + 1)
         System.arraycopy(values, 0, newValues, 0, j)
         newValues(j) = value
         System.arraycopy(values, j, newValues, j + 1, values.length - j)
@@ -87,11 +85,11 @@ private[akka] class ImmutableLongMap[A >: Null] private (
       if (size == 1)
         ImmutableLongMap.empty
       else {
-        val newKeys = Array.ofDim[Long](size - 1)
+        val newKeys = new Array[Long](size - 1)
         System.arraycopy(keys, 0, newKeys, 0, i)
         System.arraycopy(keys, i + 1, newKeys, i, keys.length - i - 1)
 
-        val newValues = Array.ofDim[A](size - 1)
+        val newValues = new Array[A](size - 1)
         System.arraycopy(values, 0, newValues, 0, i)
         System.arraycopy(values, i + 1, newValues, i, values.length - i - 1)
 

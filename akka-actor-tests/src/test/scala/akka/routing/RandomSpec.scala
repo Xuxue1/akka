@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.routing
 
 import language.postfixOps
@@ -23,7 +24,7 @@ class RandomSpec extends AkkaSpec with DefaultTimeout with ImplicitSender {
           case "hello" ⇒ sender() ! "world"
         }
 
-        override def postStop() {
+        override def postStop(): Unit = {
           stopLatch.countDown()
         }
       })), "random-shutdown")
@@ -35,7 +36,7 @@ class RandomSpec extends AkkaSpec with DefaultTimeout with ImplicitSender {
       actor ! "hello"
 
       within(2 seconds) {
-        for (i ← 1 to 5) expectMsg("world")
+        for (_ ← 1 to 5) expectMsg("world")
       }
 
       system.stop(actor)
@@ -62,8 +63,8 @@ class RandomSpec extends AkkaSpec with DefaultTimeout with ImplicitSender {
           }
         })), name = "random")
 
-      for (i ← 0 until iterationCount) {
-        for (k ← 0 until connectionCount) {
+      for (_ ← 0 until iterationCount) {
+        for (_ ← 0 until connectionCount) {
           val id = Await.result((actor ? "hit").mapTo[Int], timeout.duration)
           replies = replies + (id → (replies(id) + 1))
         }
@@ -87,7 +88,7 @@ class RandomSpec extends AkkaSpec with DefaultTimeout with ImplicitSender {
           case "hello" ⇒ helloLatch.countDown()
         }
 
-        override def postStop() {
+        override def postStop(): Unit = {
           stopLatch.countDown()
         }
       })), "random-broadcast")

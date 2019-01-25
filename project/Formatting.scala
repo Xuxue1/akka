@@ -1,43 +1,29 @@
-/**
- * Copyright (C) 2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2016-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka
 
-import sbt._
 import com.typesafe.sbt.SbtMultiJvm.MultiJvmKeys.MultiJvm
-import com.typesafe.sbt.SbtScalariform
 import com.typesafe.sbt.SbtScalariform.ScalariformKeys
+import sbt._
 
 object Formatting {
+  import scalariform.formatter.preferences._
+
   lazy val formatSettings = Seq(
-    ScalariformKeys.preferences in Compile  <<= formattingPreferences,
-    ScalariformKeys.preferences in Test     <<= formattingPreferences,
-    ScalariformKeys.preferences in MultiJvm <<= formattingPreferences
+    ScalariformKeys.preferences := setPreferences(ScalariformKeys.preferences.value),
+    ScalariformKeys.preferences in Compile := setPreferences(ScalariformKeys.preferences.value),
+    ScalariformKeys.preferences in Test := setPreferences(ScalariformKeys.preferences.value),
+    ScalariformKeys.preferences in MultiJvm := setPreferences(ScalariformKeys.preferences.value)
   )
 
-  lazy val docFormatSettings = Seq(
-    ScalariformKeys.preferences in Compile  <<= docFormattingPreferences,
-    ScalariformKeys.preferences in Test     <<= docFormattingPreferences,
-    ScalariformKeys.preferences in MultiJvm <<= docFormattingPreferences
-  )
-
-  def formattingPreferences = Def.setting {
-    import scalariform.formatter.preferences._
-    ScalariformKeys.preferences.value
-      .setPreference(RewriteArrowSymbols, true)
-      .setPreference(AlignParameters, true)
-      .setPreference(AlignSingleLineCaseStatements, true)
-      .setPreference(DanglingCloseParenthesis, Preserve)
-      .setPreference(DoubleIndentClassDeclaration, false)
-  }
-
-  def docFormattingPreferences = Def.setting {
-    import scalariform.formatter.preferences._
-    ScalariformKeys.preferences.value
-      .setPreference(RewriteArrowSymbols, false)
-      .setPreference(AlignParameters, true)
-      .setPreference(AlignSingleLineCaseStatements, true)
-      .setPreference(DanglingCloseParenthesis, Preserve)
-      .setPreference(DoubleIndentClassDeclaration, false)
-  }
+  def setPreferences(preferences: IFormattingPreferences) = preferences
+    .setPreference(RewriteArrowSymbols, true)
+    .setPreference(AlignParameters, true)
+    .setPreference(AlignSingleLineCaseStatements, true)
+    .setPreference(DoubleIndentConstructorArguments, false)
+    .setPreference(DoubleIndentMethodDeclaration, false)
+    .setPreference(DanglingCloseParenthesis, Preserve)
+    .setPreference(NewlineAtEndOfFile, true)
 }

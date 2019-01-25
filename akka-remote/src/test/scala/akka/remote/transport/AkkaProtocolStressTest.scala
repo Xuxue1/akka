@@ -1,3 +1,7 @@
+/*
+ * Copyright (C) 2018-2019 Lightbend Inc. <https://www.lightbend.com>
+ */
+
 package akka.remote.transport
 
 import akka.testkit.{ TimingTest, DefaultTimeout, ImplicitSender, AkkaSpec }
@@ -114,7 +118,7 @@ class AkkaProtocolStressTest extends AkkaSpec(configA) with ImplicitSender with 
     }
   }
 
-  override def beforeTermination() {
+  override def beforeTermination(): Unit = {
     system.eventStream.publish(TestEvent.Mute(
       EventFilter.warning(source = "akka://AkkaProtocolStressTest/user/$a", start = "received dead letter"),
       EventFilter.warning(pattern = "received dead letter.*(InboundPayload|Disassociate)")))

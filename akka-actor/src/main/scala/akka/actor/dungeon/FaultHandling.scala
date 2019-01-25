@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.actor.dungeon
@@ -66,7 +66,7 @@ private[akka] trait FaultHandling { this: ActorCell ⇒
           // if the actor fails in preRestart, we can do nothing but log it: it’s best-effort
           if (failedActor.context ne null) failedActor.aroundPreRestart(cause, optionalMessage)
         } catch handleNonFatalOrInterruptedException { e ⇒
-          val ex = new PreRestartException(self, e, cause, optionalMessage)
+          val ex = PreRestartException(self, e, cause, optionalMessage)
           publish(Error(ex, self.path.toString, clazz(failedActor), e.getMessage))
         } finally {
           clearActorFields(failedActor, recreate = true)
@@ -139,7 +139,7 @@ private[akka] trait FaultHandling { this: ActorCell ⇒
     }
   }
 
-  protected def terminate() {
+  protected def terminate(): Unit = {
     setReceiveTimeout(Duration.Undefined)
     cancelReceiveTimeout
 
@@ -200,7 +200,7 @@ private[akka] trait FaultHandling { this: ActorCell ⇒
     }
   }
 
-  private def finishTerminate() {
+  private def finishTerminate(): Unit = {
     val a = actor
     /* The following order is crucial for things to work properly. Only change this if you're very confident and lucky.
      *
@@ -247,7 +247,7 @@ private[akka] trait FaultHandling { this: ActorCell ⇒
         })
     } catch handleNonFatalOrInterruptedException { e ⇒
       clearActorFields(actor, recreate = false) // in order to prevent preRestart() from happening again
-      handleInvokeFailure(survivors, new PostRestartException(self, e, cause))
+      handleInvokeFailure(survivors, PostRestartException(self, e, cause))
     }
   }
 
@@ -288,10 +288,10 @@ private[akka] trait FaultHandling { this: ActorCell ⇒
      * then we are continuing the previously suspended recreate/create/terminate action
      */
     status match {
-      case Some(c @ ChildrenContainer.Recreation(cause)) ⇒ finishRecreate(cause, actor)
-      case Some(c @ ChildrenContainer.Creation()) ⇒ finishCreate()
-      case Some(ChildrenContainer.Termination) ⇒ finishTerminate()
-      case _ ⇒
+      case Some(ChildrenContainer.Recreation(cause)) ⇒ finishRecreate(cause, actor)
+      case Some(ChildrenContainer.Creation())        ⇒ finishCreate()
+      case Some(ChildrenContainer.Termination)       ⇒ finishTerminate()
+      case _                                         ⇒
     }
   }
 

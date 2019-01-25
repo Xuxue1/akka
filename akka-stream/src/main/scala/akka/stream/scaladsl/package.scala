@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2014-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2014-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream
 
 import java.util.concurrent.CompletionStage
@@ -43,7 +44,7 @@ import scala.compat.java8.FutureConverters
  * often than for corresponding transformations on strict collections like
  * [[List]]. *An important consequence* is that elements that were produced
  * into a stream may be discarded by later processors, e.g. when using the
- * [[#take]] combinator.
+ * [[#take]] operator.
  *
  * By default every operation is executed within its own [[akka.actor.Actor]]
  * to enable full pipelining of the chained set of computations. This behavior

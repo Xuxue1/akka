@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.scaladsl
 
 import scala.concurrent.Await
@@ -9,7 +10,7 @@ import scala.concurrent.duration._
 import akka.stream.{ BufferOverflowException, ActorMaterializer, ActorMaterializerSettings, OverflowStrategy }
 import akka.stream.testkit._
 import akka.stream.testkit.scaladsl._
-import akka.stream.testkit.Utils._
+import akka.stream.testkit.scaladsl.StreamTestKit._
 
 class FlowBufferSpec extends StreamSpec {
 

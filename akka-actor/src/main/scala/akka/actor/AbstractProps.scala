@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.actor
@@ -8,7 +8,6 @@ import java.lang.reflect.{ Modifier, ParameterizedType, TypeVariable }
 import akka.japi.Creator
 import akka.util.Reflect
 import scala.annotation.varargs
-import scala.language.existentials
 import scala.annotation.tailrec
 import java.lang.reflect.Constructor
 
@@ -39,6 +38,7 @@ private[akka] trait AbstractProps {
    *
    * Use the Props.create(actorClass, creator) instead.
    */
+  @deprecated("Use Props.create(actorClass, creator) instead, since this can't be used with Java 8 lambda.", "2.5.18")
   def create[T <: Actor](creator: Creator[T]): Props = {
     val cc = creator.getClass
     checkCreatorClosingOver(cc)
@@ -54,7 +54,7 @@ private[akka] trait AbstractProps {
           case x ⇒ throw new IllegalArgumentException(s"unsupported type found in Creator argument [$x]")
         }
       case c: Class[_] if (c == coc) ⇒
-        throw new IllegalArgumentException(s"erased Creator types are unsupported, use Props.create(actorClass, creator) instead")
+        throw new IllegalArgumentException("erased Creator types (e.g. lambdas) are unsupported, use Props.create(actorClass, creator) instead")
     }
     create(classOf[CreatorConsumer], actorClass, creator)
   }

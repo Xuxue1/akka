@@ -1,15 +1,18 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.remote.transport
 
-import scala.concurrent.{ Promise, Future }
-import akka.actor.{ NoSerializationVerificationNeeded, ActorRef, Address }
-import akka.util.ByteString
+import scala.concurrent.{ Future, Promise }
+import scala.util.control.NoStackTrace
+
+import akka.actor.{ ActorRef, Address, NoSerializationVerificationNeeded }
+import akka.util.{ ByteString, unused }
 import akka.remote.transport.AssociationHandle.HandleEventListener
 import akka.AkkaException
-import scala.util.control.NoStackTrace
 import akka.actor.DeadLetterSuppression
+import akka.event.LoggingAdapter
 
 object Transport {
 
@@ -140,7 +143,7 @@ trait Transport {
    * @param cmd Command message to the transport
    * @return Future that succeeds when the command was handled or dropped
    */
-  def managementCommand(cmd: Any): Future[Boolean] = { Future.successful(false) }
+  def managementCommand(@unused cmd: Any): Future[Boolean] = { Future.successful(false) }
 
 }
 
@@ -261,7 +264,22 @@ trait AssociationHandle {
    * could be called arbitrarily many times.
    *
    */
+  @deprecated(message = "Use method that states reasons to make sure disassociation reasons are logged.", since = "2.5.3")
   def disassociate(): Unit
 
+  /**
+   * Closes the underlying transport link, if needed. Some transports might not need an explicit teardown (UDP) and
+   * some transports may not support it (hardware connections). Remote endpoint of the channel or connection MAY
+   * be notified, but this is not guaranteed. The Transport that provides the handle MUST guarantee that disassociate()
+   * could be called arbitrarily many times.
+   */
+  def disassociate(reason: String, log: LoggingAdapter): Unit = {
+    if (log.isDebugEnabled)
+      log.debug(
+        "Association between local [{}] and remote [{}] was disassociated because {}",
+        localAddress, remoteAddress, reason)
+
+    disassociate()
+  }
 }
 

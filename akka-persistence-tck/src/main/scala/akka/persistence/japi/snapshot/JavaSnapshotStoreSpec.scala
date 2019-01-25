@@ -1,9 +1,11 @@
-/**
- * Copyright (C) 2014-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2014-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.persistence.japi.snapshot
 
-import akka.persistence.snapshot.{ SnapshotStoreSpec }
+import akka.persistence.CapabilityFlag
+import akka.persistence.snapshot.SnapshotStoreSpec
 import com.typesafe.config.Config
 
 /**
@@ -17,4 +19,6 @@ import com.typesafe.config.Config
  *
  * @see [[akka.persistence.snapshot.SnapshotStoreSpec]]
  */
-class JavaSnapshotStoreSpec(config: Config) extends SnapshotStoreSpec(config)
+class JavaSnapshotStoreSpec(config: Config) extends SnapshotStoreSpec(config) {
+  override protected def supportsSerialization: CapabilityFlag = CapabilityFlag.on
+}

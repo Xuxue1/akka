@@ -1,12 +1,11 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.actor
 
-import language.existentials
-
 import scala.util.control.NonFatal
-import scala.util.{ Try, Success, Failure }
+import scala.util.{ Failure, Success, Try }
 import scala.collection.immutable
 import scala.concurrent.duration.FiniteDuration
 import scala.reflect.ClassTag
@@ -15,12 +14,13 @@ import akka.japi.{ Creator, Option ⇒ JOption }
 import akka.japi.Util.{ immutableSeq, immutableSingletonSeq }
 import akka.util.Timeout
 import akka.util.Reflect.instantiator
-import akka.serialization.{ JavaSerializer, SerializationExtension }
+import akka.serialization.{ JavaSerializer, SerializationExtension, Serializers }
 import akka.dispatch._
 import java.util.concurrent.atomic.{ AtomicReference ⇒ AtomVar }
 import java.util.concurrent.TimeoutException
 import java.io.ObjectStreamException
-import java.lang.reflect.{ InvocationTargetException, Method, InvocationHandler, Proxy }
+import java.lang.reflect.{ InvocationHandler, InvocationTargetException, Method, Proxy }
+
 import akka.pattern.AskTimeoutException
 
 /**
@@ -151,11 +151,11 @@ object TypedActor extends ExtensionId[TypedActorExtension] with ExtensionIdProvi
       case ps if ps.length == 0 ⇒ SerializedMethodCall(method.getDeclaringClass, method.getName, method.getParameterTypes, Array())
       case ps ⇒
         val serialization = SerializationExtension(akka.serialization.JavaSerializer.currentSystem.value)
-        val serializedParameters = Array.ofDim[(Int, Class[_], Array[Byte])](ps.length)
+        val serializedParameters = new Array[(Int, String, Array[Byte])](ps.length)
         for (i ← 0 until ps.length) {
           val p = ps(i)
           val s = serialization.findSerializerFor(p)
-          val m = if (s.includeManifest) p.getClass else null
+          val m = Serializers.manifestFor(s, p)
           serializedParameters(i) = (s.identifier, m, s toBinary parameters(i)) //Mutable for the sake of sanity
         }
 
@@ -168,7 +168,7 @@ object TypedActor extends ExtensionId[TypedActorExtension] with ExtensionIdProvi
    *
    * Represents the serialized form of a MethodCall, uses readResolve and writeReplace to marshall the call
    */
-  private[akka] final case class SerializedMethodCall(ownerType: Class[_], methodName: String, parameterTypes: Array[Class[_]], serializedParameters: Array[(Int, Class[_], Array[Byte])]) {
+  private[akka] final case class SerializedMethodCall(ownerType: Class[_], methodName: String, parameterTypes: Array[Class[_]], serializedParameters: Array[(Int, String, Array[Byte])]) {
 
     //TODO implement writeObject and readObject to serialize
     //TODO Possible optimization is to special encode the parameter-types to conserve space
@@ -176,17 +176,16 @@ object TypedActor extends ExtensionId[TypedActorExtension] with ExtensionIdProvi
       val system = akka.serialization.JavaSerializer.currentSystem.value
       if (system eq null) throw new IllegalStateException(
         "Trying to deserialize a SerializedMethodCall without an ActorSystem in scope." +
-          " Use akka.serialization.Serialization.currentSystem.withValue(system) { ... }")
+          " Use akka.serialization.JavaSerializer.currentSystem.withValue(system) { ... }")
       val serialization = SerializationExtension(system)
       MethodCall(ownerType.getDeclaredMethod(methodName, parameterTypes: _*), serializedParameters match {
         case null               ⇒ null
         case a if a.length == 0 ⇒ Array[AnyRef]()
         case a ⇒
-          val deserializedParameters: Array[AnyRef] = Array.ofDim[AnyRef](a.length) //Mutable for the sake of sanity
+          val deserializedParameters: Array[AnyRef] = new Array[AnyRef](a.length) //Mutable for the sake of sanity
           for (i ← 0 until a.length) {
             val (sId, manifest, bytes) = a(i)
-            deserializedParameters(i) =
-              serialization.serializerByIdentity(sId).fromBinary(bytes, Option(manifest))
+            deserializedParameters(i) = serialization.deserialize(bytes, sId, manifest).get
           }
 
           deserializedParameters
@@ -443,7 +442,8 @@ object TypedActor extends ExtensionId[TypedActorExtension] with ExtensionIdProvi
    */
   private[akka] final case class SerializedTypedActorInvocationHandler(val actor: ActorRef, val timeout: FiniteDuration) {
     @throws(classOf[ObjectStreamException]) private def readResolve(): AnyRef = JavaSerializer.currentSystem.value match {
-      case null ⇒ throw new IllegalStateException("SerializedTypedActorInvocationHandler.readResolve requires that JavaSerializer.currentSystem.value is set to a non-null value")
+      case null ⇒ throw new IllegalStateException("SerializedTypedActorInvocationHandler.readResolve requires that " +
+        "JavaSerializer.currentSystem.value is set to a non-null value")
       case some ⇒ toTypedActorInvocationHandler(some)
     }
 

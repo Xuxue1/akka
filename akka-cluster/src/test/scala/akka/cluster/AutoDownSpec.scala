@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.cluster
@@ -13,6 +13,7 @@ import akka.cluster.MemberStatus._
 import akka.cluster.ClusterEvent._
 import akka.remote.RARP
 import akka.testkit.AkkaSpec
+import akka.testkit.TimingTest
 
 object AutoDownSpec {
   final case class DownCalled(address: Address)
@@ -83,7 +84,7 @@ class AutoDownSpec extends AkkaSpec("akka.actor.provider=remote") {
       expectMsg(DownCalled(memberB.address))
     }
 
-    "down unreachable when becoming leader inbetween detection and specified duration" in {
+    "down unreachable when becoming leader in-between detection and specified duration" in {
       val a = autoDownActor(2.seconds)
       a ! LeaderChanged(Some(memberB.address))
       a ! UnreachableMember(memberC)
@@ -92,7 +93,7 @@ class AutoDownSpec extends AkkaSpec("akka.actor.provider=remote") {
       expectMsg(DownCalled(memberC.address))
     }
 
-    "not down unreachable when losing leadership inbetween detection and specified duration" in {
+    "not down unreachable when losing leadership in-between detection and specified duration" taggedAs TimingTest in {
       val a = autoDownActor(2.seconds)
       a ! LeaderChanged(Some(memberA.address))
       a ! UnreachableMember(memberC)
@@ -100,7 +101,7 @@ class AutoDownSpec extends AkkaSpec("akka.actor.provider=remote") {
       expectNoMsg(3.second)
     }
 
-    "not down when unreachable become reachable inbetween detection and specified duration" in {
+    "not down when unreachable become reachable in-between detection and specified duration" taggedAs TimingTest in {
       val a = autoDownActor(2.seconds)
       a ! LeaderChanged(Some(memberA.address))
       a ! UnreachableMember(memberB)
@@ -108,7 +109,7 @@ class AutoDownSpec extends AkkaSpec("akka.actor.provider=remote") {
       expectNoMsg(3.second)
     }
 
-    "not down when unreachable is removed inbetween detection and specified duration" in {
+    "not down when unreachable is removed in-between detection and specified duration" taggedAs TimingTest in {
       val a = autoDownActor(2.seconds)
       a ! LeaderChanged(Some(memberA.address))
       a ! UnreachableMember(memberB)

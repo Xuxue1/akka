@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2016-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.cluster
 
 import java.util.concurrent.atomic.AtomicBoolean
@@ -8,9 +9,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import akka.ConfigurationException
 import akka.actor.{ ActorSystem, Props }
 import akka.testkit.TestKit.{ awaitCond, shutdownActorSystem }
-import akka.testkit.{ TestKit, TestProbe }
 import com.typesafe.config.ConfigFactory
-import org.scalatest.concurrent.Futures
 import org.scalatest.{ Matchers, WordSpec }
 
 import scala.concurrent.duration._

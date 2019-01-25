@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.persistence.journal.leveldb
@@ -71,7 +71,7 @@ class SharedLeveldbJournalSpec extends AkkaSpec(SharedLeveldbJournalSpec.config)
   val systemA = ActorSystem("SysA", system.settings.config)
   val systemB = ActorSystem("SysB", system.settings.config)
 
-  override protected def afterTermination() {
+  override protected def afterTermination(): Unit = {
     shutdown(systemA)
     shutdown(systemB)
     super.afterTermination()
@@ -83,7 +83,8 @@ class SharedLeveldbJournalSpec extends AkkaSpec(SharedLeveldbJournalSpec.config)
       val probeA = new TestProbe(systemA)
       val probeB = new TestProbe(systemB)
 
-      system.actorOf(Props[SharedLeveldbStore], "store")
+      val storeConfig = system.settings.config.getConfig("akka.persistence.journal.leveldb-shared")
+      system.actorOf(Props(classOf[SharedLeveldbStore], storeConfig), "store")
       val storePath = RootActorPath(system.asInstanceOf[ExtendedActorSystem].provider.getDefaultAddress) / "user" / "store"
 
       val appA = systemA.actorOf(Props(classOf[ExampleApp], probeA.ref, storePath))

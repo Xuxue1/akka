@@ -1,7 +1,10 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.impl
+
+import akka.annotation.InternalApi
 
 import scala.util.control.NonFatal
 import org.reactivestreams.{ Subscriber, Subscription }
@@ -9,7 +12,7 @@ import org.reactivestreams.{ Subscriber, Subscription }
 /**
  * INTERNAL API
  */
-private[stream] object ReactiveStreamsCompliance {
+@InternalApi private[stream] object ReactiveStreamsCompliance {
 
   final val CanNotSubscribeTheSameSubscriberMultipleTimes =
     "can not subscribe the same subscriber multiple times (see reactive-streams specification, rules 1.10 and 2.12)"
@@ -107,12 +110,14 @@ private[stream] object ReactiveStreamsCompliance {
   }
 
   final def tryRequest(subscription: Subscription, demand: Long): Unit = {
+    if (subscription eq null) throw new IllegalStateException("Subscription must be not null on request() call, rule 1.3")
     try subscription.request(demand) catch {
       case NonFatal(t) ⇒ throw new SignalThrewException("It is illegal to throw exceptions from request(), rule 3.16", t)
     }
   }
 
   final def tryCancel(subscription: Subscription): Unit = {
+    if (subscription eq null) throw new IllegalStateException("Subscription must be not null on cancel() call, rule 1.3")
     try subscription.cancel() catch {
       case NonFatal(t) ⇒ throw new SignalThrewException("It is illegal to throw exceptions from cancel(), rule 3.15", t)
     }

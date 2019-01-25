@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.actor
 
 import akka.testkit._
@@ -38,7 +39,7 @@ object FSMTransitionSpec {
       case Event("reply", _) ⇒ stay replying "reply"
     }
     initialize()
-    override def preRestart(reason: Throwable, msg: Option[Any]) { target ! "restarted" }
+    override def preRestart(reason: Throwable, msg: Option[Any]): Unit = { target ! "restarted" }
   }
 
   class OtherFSM(target: ActorRef) extends Actor with FSM[Int, Int] {

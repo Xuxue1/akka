@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.actor
 
 import language.postfixOps
@@ -38,7 +39,7 @@ class SupervisorMiscSpec extends AkkaSpec(SupervisorMiscSpec.config) with Defaul
           OneForOneStrategy(maxNrOfRetries = 3, withinTimeRange = 5 seconds)(List(classOf[Exception])))))
 
         val workerProps = Props(new Actor {
-          override def postRestart(cause: Throwable) { countDownLatch.countDown() }
+          override def postRestart(cause: Throwable): Unit = { countDownLatch.countDown() }
           def receive = {
             case "status" ⇒ this.sender() ! "OK"
             case _        ⇒ this.context.stop(self)

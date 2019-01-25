@@ -1,3 +1,7 @@
+/*
+ * Copyright (C) 2018-2019 Lightbend Inc. <https://www.lightbend.com>
+ */
+
 package akka.remote.transport
 
 import com.typesafe.config.{ ConfigFactory, Config }
@@ -134,7 +138,7 @@ class ThrottlerTransportAdapterSpec extends AkkaSpec(configA) with ImplicitSende
 
   }
 
-  override def beforeTermination() {
+  override def beforeTermination(): Unit = {
     system.eventStream.publish(TestEvent.Mute(
       EventFilter.warning(source = "akka://AkkaProtocolStressTest/user/$a", start = "received dead letter"),
       EventFilter.warning(pattern = "received dead letter.*(InboundPayload|Disassociate)")))

@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.cluster.metrics
@@ -66,10 +66,6 @@ object AdaptiveLoadBalancingRouterConfig extends MultiNodeConfig {
   }
 
   commonConfig(debugConfig(on = false).withFallback(ConfigFactory.parseString("""
-
-      # Disable legacy metrics.
-      akka.cluster.metrics.enabled=off
-
       # Enable metrics estension.
       akka.extensions=["akka.cluster.metrics.ClusterMetricsExtension"]
 
@@ -142,7 +138,7 @@ abstract class AdaptiveLoadBalancingRouterSpec extends MultiNodeSpec(AdaptiveLoa
     val router = system.actorOf(
       ClusterRouterPool(
         local = AdaptiveLoadBalancingPool(HeapMetricsSelector),
-        settings = ClusterRouterPoolSettings(totalInstances = 10, maxInstancesPerNode = 1, allowLocalRoutees = true, useRole = None)).
+        settings = ClusterRouterPoolSettings(totalInstances = 10, maxInstancesPerNode = 1, allowLocalRoutees = true)).
         props(Props[Echo]),
       name)
     // it may take some time until router receives cluster member events

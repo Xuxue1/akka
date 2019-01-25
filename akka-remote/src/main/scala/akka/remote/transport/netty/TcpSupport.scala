@@ -1,16 +1,20 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.remote.transport.netty
 
 import akka.actor.Address
 import akka.remote.transport.AssociationHandle
-import akka.remote.transport.AssociationHandle.{ HandleEvent, HandleEventListener, Disassociated, InboundPayload }
+import akka.remote.transport.AssociationHandle.{ Disassociated, HandleEvent, HandleEventListener, InboundPayload }
 import akka.remote.transport.Transport.AssociationEventListener
 import akka.util.ByteString
 import java.net.InetSocketAddress
-import org.jboss.netty.buffer.{ ChannelBuffers, ChannelBuffer }
+
+import akka.event.LoggingAdapter
+import org.jboss.netty.buffer.{ ChannelBuffer, ChannelBuffers }
 import org.jboss.netty.channel._
+
 import scala.concurrent.{ Future, Promise }
 
 /**
@@ -25,6 +29,7 @@ private[remote] object ChannelLocalActor extends ChannelLocal[Option[HandleEvent
  * INTERNAL API
  */
 private[remote] trait TcpHandlers extends CommonHandlers {
+  protected def log: LoggingAdapter
 
   import ChannelLocalActor._
 
@@ -37,8 +42,10 @@ private[remote] trait TcpHandlers extends CommonHandlers {
   override def createHandle(channel: Channel, localAddress: Address, remoteAddress: Address): AssociationHandle =
     new TcpAssociationHandle(localAddress, remoteAddress, transport, channel)
 
-  override def onDisconnect(ctx: ChannelHandlerContext, e: ChannelStateEvent): Unit =
+  override def onDisconnect(ctx: ChannelHandlerContext, e: ChannelStateEvent): Unit = {
     notifyListener(e.getChannel, Disassociated(AssociationHandle.Unknown))
+    log.debug("Remote connection to [{}] was disconnected because of {}", e.getChannel.getRemoteAddress, e)
+  }
 
   override def onMessage(ctx: ChannelHandlerContext, e: MessageEvent): Unit = {
     val bytes: Array[Byte] = e.getMessage.asInstanceOf[ChannelBuffer].array()
@@ -47,6 +54,7 @@ private[remote] trait TcpHandlers extends CommonHandlers {
 
   override def onException(ctx: ChannelHandlerContext, e: ExceptionEvent): Unit = {
     notifyListener(e.getChannel, Disassociated(AssociationHandle.Unknown))
+    log.warning("Remote connection to [{}] failed with {}", e.getChannel.getRemoteAddress, e.getCause)
     e.getChannel.close() // No graceful close here
   }
 }
@@ -54,7 +62,7 @@ private[remote] trait TcpHandlers extends CommonHandlers {
 /**
  * INTERNAL API
  */
-private[remote] class TcpServerHandler(_transport: NettyTransport, _associationListenerFuture: Future[AssociationEventListener])
+private[remote] class TcpServerHandler(_transport: NettyTransport, _associationListenerFuture: Future[AssociationEventListener], val log: LoggingAdapter)
   extends ServerHandler(_transport, _associationListenerFuture) with TcpHandlers {
 
   override def onConnect(ctx: ChannelHandlerContext, e: ChannelStateEvent): Unit =
@@ -65,7 +73,7 @@ private[remote] class TcpServerHandler(_transport: NettyTransport, _associationL
 /**
  * INTERNAL API
  */
-private[remote] class TcpClientHandler(_transport: NettyTransport, remoteAddress: Address)
+private[remote] class TcpClientHandler(_transport: NettyTransport, remoteAddress: Address, val log: LoggingAdapter)
   extends ClientHandler(_transport, remoteAddress) with TcpHandlers {
 
   override def onConnect(ctx: ChannelHandlerContext, e: ChannelStateEvent): Unit =

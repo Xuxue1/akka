@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.io
@@ -13,7 +13,6 @@ import akka.actor._
 import akka.io.SelectionHandler._
 import akka.io.Tcp._
 import akka.dispatch.{ RequiresMessageQueue, UnboundedMessageQueueSemantics }
-import akka.util.Helpers
 
 /**
  * INTERNAL API
@@ -67,7 +66,7 @@ private[io] class TcpListener(
       ret
     } catch {
       case NonFatal(e) ⇒
-        bindCommander ! bind.failureMessage
+        bindCommander ! bind.failureMessage.withCause(e)
         log.error(e, "Bind failed for TCP channel on endpoint [{}]", bind.localAddress)
         context.stop(self)
     }
@@ -98,10 +97,13 @@ private[io] class TcpListener(
 
     case Unbind ⇒
       log.debug("Unbinding endpoint {}", localAddress)
-      channel.close()
-      // see https://github.com/akka/akka/issues/20282
-      if (Helpers.isWindows) registration.enableInterest(1)
-      sender() ! Unbound
+      registration.cancelAndClose { () ⇒ self ! Unbound }
+
+      context.become(unregistering(sender()))
+  }
+  def unregistering(requester: ActorRef): Receive = {
+    case Unbound ⇒
+      requester ! Unbound
       log.debug("Unbound endpoint {}, stopping listener", localAddress)
       context.stop(self)
   }
@@ -124,7 +126,7 @@ private[io] class TcpListener(
     } else if (bind.pullMode) limit else BatchAcceptLimit
   }
 
-  override def postStop() {
+  override def postStop(): Unit = {
     try {
       if (channel.isOpen) {
         log.debug("Closing serverSocketChannel after being stopped")

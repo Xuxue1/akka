@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2014-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2014-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.tck
 
 import akka.actor.Props
@@ -29,7 +30,7 @@ object ActorPublisherTest {
       case _ ⇒ // no-op
     }
 
-    def loopDemand() {
+    def loopDemand(): Unit = {
       val loopUntil = math.min(100, totalDemand)
       1 to loopUntil.toInt foreach { _ ⇒ self ! Produce }
       if (loopUntil > 100) self ! Loop

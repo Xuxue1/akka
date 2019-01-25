@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.routing
 
 import java.time.LocalDateTime
@@ -240,8 +241,8 @@ class MetricsBasedResizerSpec extends AkkaSpec(ResizerSpec.config) with DefaultT
 
       msgs1.foreach(_.second.open()) //process two messages
 
-      // make sure some time passes inbetween
-      Thread.sleep(100)
+      // make sure some time passes in-between
+      Thread.sleep(300)
 
       // wait for routees to update their mail boxes
       msgs2.foreach(l ⇒ Await.ready(l.first, timeout.duration))
@@ -272,8 +273,8 @@ class MetricsBasedResizerSpec extends AkkaSpec(ResizerSpec.config) with DefaultT
 
       msgs1.foreach(_.second.open()) //process two messages
 
-      // make sure some time passes inbetween
-      Thread.sleep(100)
+      // make sure some time passes in-between
+      Thread.sleep(300)
 
       // wait for routees to update their mail boxes
       msgs2.foreach(l ⇒ Await.ready(l.first, timeout.duration))

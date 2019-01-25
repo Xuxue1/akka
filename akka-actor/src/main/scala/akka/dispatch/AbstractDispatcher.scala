@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.dispatch
@@ -8,22 +8,23 @@ import java.util.concurrent._
 import java.{ util ⇒ ju }
 
 import akka.actor._
+import akka.dispatch.affinity.AffinityPoolConfigurator
 import akka.dispatch.sysmsg._
 import akka.event.EventStream
 import akka.event.Logging.{ Debug, Error, LogEventException }
-import akka.util.{ Index, Unsafe }
+import akka.util.{ Index, Unsafe, unused }
 import com.typesafe.config.Config
+
 import scala.annotation.tailrec
 import scala.concurrent.{ ExecutionContext, ExecutionContextExecutor }
 import scala.concurrent.duration.{ Duration, FiniteDuration }
-import scala.concurrent.forkjoin.{ ForkJoinPool, ForkJoinTask }
 import scala.util.control.NonFatal
 
 final case class Envelope private (val message: Any, val sender: ActorRef)
 
 object Envelope {
   def apply(message: Any, sender: ActorRef, system: ActorSystem): Envelope = {
-    if (message == null) throw new InvalidMessageException("Message is null")
+    if (message == null) throw InvalidMessageException("Message is null")
     new Envelope(message, if (sender ne Actor.noSender) sender else system.deadLetters)
   }
 }
@@ -191,7 +192,7 @@ abstract class MessageDispatcher(val configurator: MessageDispatcherConfigurator
    *
    * INTERNAL API
    */
-  protected[akka] def register(actor: ActorCell) {
+  protected[akka] def register(actor: ActorCell): Unit = {
     if (debug) actors.put(this, actor.self)
     addInhabitants(+1)
   }
@@ -201,7 +202,7 @@ abstract class MessageDispatcher(val configurator: MessageDispatcherConfigurator
    *
    * INTERNAL API
    */
-  protected[akka] def unregister(actor: ActorCell) {
+  protected[akka] def unregister(actor: ActorCell): Unit = {
     if (debug) actors.remove(this, actor.self)
     addInhabitants(-1)
     val mailBox = actor.swapMailbox(mailboxes.deadLetterMailbox)
@@ -211,7 +212,7 @@ abstract class MessageDispatcher(val configurator: MessageDispatcherConfigurator
 
   private val shutdownAction = new Runnable {
     @tailrec
-    final def run() {
+    final def run(): Unit = {
       shutdownSchedule match {
         case SCHEDULED ⇒
           try {
@@ -259,14 +260,14 @@ abstract class MessageDispatcher(val configurator: MessageDispatcherConfigurator
    *
    * INTERNAL API
    */
-  protected[akka] def systemDispatch(receiver: ActorCell, invocation: SystemMessage)
+  protected[akka] def systemDispatch(receiver: ActorCell, invocation: SystemMessage): Unit
 
   /**
    * Will be called when the dispatcher is to queue an invocation for execution
    *
    * INTERNAL API
    */
-  protected[akka] def dispatch(receiver: ActorCell, invocation: Envelope)
+  protected[akka] def dispatch(receiver: ActorCell, invocation: Envelope): Unit
 
   /**
    * Suggest to register the provided mailbox for execution
@@ -294,7 +295,7 @@ abstract class MessageDispatcher(val configurator: MessageDispatcherConfigurator
   /**
    * INTERNAL API
    */
-  protected[akka] def executeTask(invocation: TaskInvocation)
+  protected[akka] def executeTask(invocation: TaskInvocation): Unit
 
   /**
    * Called one time every time an actor is detached from this dispatcher and this dispatcher has no actors left attached
@@ -308,7 +309,7 @@ abstract class MessageDispatcher(val configurator: MessageDispatcherConfigurator
 /**
  * An ExecutorServiceConfigurator is a class that given some prerequisites and a configuration can create instances of ExecutorService
  */
-abstract class ExecutorServiceConfigurator(config: Config, prerequisites: DispatcherPrerequisites) extends ExecutorServiceFactoryProvider
+abstract class ExecutorServiceConfigurator(@unused config: Config, @unused prerequisites: DispatcherPrerequisites) extends ExecutorServiceFactoryProvider
 
 /**
  * Base class to be used for hooking in new dispatchers into Dispatchers.
@@ -328,6 +329,8 @@ abstract class MessageDispatcherConfigurator(_config: Config, val prerequisites:
     def configurator(executor: String): ExecutorServiceConfigurator = executor match {
       case null | "" | "fork-join-executor" ⇒ new ForkJoinExecutorConfigurator(config.getConfig("fork-join-executor"), prerequisites)
       case "thread-pool-executor"           ⇒ new ThreadPoolExecutorConfigurator(config.getConfig("thread-pool-executor"), prerequisites)
+      case "affinity-pool-executor"         ⇒ new AffinityPoolConfigurator(config.getConfig("affinity-pool-executor"), prerequisites)
+
       case fqcn ⇒
         val args = List(
           classOf[Config] → config,
@@ -351,7 +354,7 @@ class ThreadPoolExecutorConfigurator(config: Config, prerequisites: DispatcherPr
 
   val threadPoolConfig: ThreadPoolConfig = createThreadPoolConfigBuilder(config, prerequisites).config
 
-  protected def createThreadPoolConfigBuilder(config: Config, prerequisites: DispatcherPrerequisites): ThreadPoolConfigBuilder = {
+  protected def createThreadPoolConfigBuilder(config: Config, @unused prerequisites: DispatcherPrerequisites): ThreadPoolConfigBuilder = {
     import akka.util.Helpers.ConfigOps
     val builder =
       ThreadPoolConfigBuilder(ThreadPoolConfig())
@@ -378,94 +381,6 @@ class ThreadPoolExecutorConfigurator(config: Config, prerequisites: DispatcherPr
 
   def createExecutorServiceFactory(id: String, threadFactory: ThreadFactory): ExecutorServiceFactory =
     threadPoolConfig.createExecutorServiceFactory(id, threadFactory)
-}
-
-object ForkJoinExecutorConfigurator {
-
-  /**
-   * INTERNAL AKKA USAGE ONLY
-   */
-  final class AkkaForkJoinPool(
-    parallelism:               Int,
-    threadFactory:             ForkJoinPool.ForkJoinWorkerThreadFactory,
-    unhandledExceptionHandler: Thread.UncaughtExceptionHandler,
-    asyncMode:                 Boolean)
-    extends ForkJoinPool(parallelism, threadFactory, unhandledExceptionHandler, asyncMode) with LoadMetrics {
-    def this(
-      parallelism:               Int,
-      threadFactory:             ForkJoinPool.ForkJoinWorkerThreadFactory,
-      unhandledExceptionHandler: Thread.UncaughtExceptionHandler) = this(parallelism, threadFactory, unhandledExceptionHandler, asyncMode = true)
-
-    override def execute(r: Runnable): Unit =
-      if (r ne null)
-        super.execute((if (r.isInstanceOf[ForkJoinTask[_]]) r else new AkkaForkJoinTask(r)).asInstanceOf[ForkJoinTask[Any]])
-      else
-        throw new NullPointerException("Runnable was null")
-
-    def atFullThrottle(): Boolean = this.getActiveThreadCount() >= this.getParallelism()
-  }
-
-  /**
-   * INTERNAL AKKA USAGE ONLY
-   */
-  @SerialVersionUID(1L)
-  final class AkkaForkJoinTask(runnable: Runnable) extends ForkJoinTask[Unit] {
-    override def getRawResult(): Unit = ()
-    override def setRawResult(unit: Unit): Unit = ()
-    final override def exec(): Boolean = try { runnable.run(); true } catch {
-      case ie: InterruptedException ⇒
-        Thread.currentThread.interrupt()
-        false
-      case anything: Throwable ⇒
-        val t = Thread.currentThread
-        t.getUncaughtExceptionHandler match {
-          case null ⇒
-          case some ⇒ some.uncaughtException(t, anything)
-        }
-        throw anything
-    }
-  }
-}
-
-class ForkJoinExecutorConfigurator(config: Config, prerequisites: DispatcherPrerequisites) extends ExecutorServiceConfigurator(config, prerequisites) {
-  import ForkJoinExecutorConfigurator._
-
-  def validate(t: ThreadFactory): ForkJoinPool.ForkJoinWorkerThreadFactory = t match {
-    case correct: ForkJoinPool.ForkJoinWorkerThreadFactory ⇒ correct
-    case x ⇒ throw new IllegalStateException("The prerequisites for the ForkJoinExecutorConfigurator is a ForkJoinPool.ForkJoinWorkerThreadFactory!")
-  }
-
-  class ForkJoinExecutorServiceFactory(
-    val threadFactory: ForkJoinPool.ForkJoinWorkerThreadFactory,
-    val parallelism:   Int,
-    val asyncMode:     Boolean) extends ExecutorServiceFactory {
-    def this(threadFactory: ForkJoinPool.ForkJoinWorkerThreadFactory, parallelism: Int) = this(threadFactory, parallelism, asyncMode = true)
-    def createExecutorService: ExecutorService = new AkkaForkJoinPool(parallelism, threadFactory, MonitorableThreadFactory.doNothing, asyncMode)
-  }
-
-  final def createExecutorServiceFactory(id: String, threadFactory: ThreadFactory): ExecutorServiceFactory = {
-    val tf = threadFactory match {
-      case m: MonitorableThreadFactory ⇒
-        // add the dispatcher id to the thread names
-        m.withName(m.name + "-" + id)
-      case other ⇒ other
-    }
-
-    val asyncMode = config.getString("task-peeking-mode") match {
-      case "FIFO" ⇒ true
-      case "LIFO" ⇒ false
-      case unsupported ⇒ throw new IllegalArgumentException("Cannot instantiate ForkJoinExecutorServiceFactory. " +
-        """"task-peeking-mode" in "fork-join-executor" section could only set to "FIFO" or "LIFO".""")
-    }
-
-    new ForkJoinExecutorServiceFactory(
-      validate(tf),
-      ThreadPoolConfig.scaledPoolSize(
-        config.getInt("parallelism-min"),
-        config.getDouble("parallelism-factor"),
-        config.getInt("parallelism-max")),
-      asyncMode)
-  }
 }
 
 class DefaultExecutorServiceConfigurator(config: Config, prerequisites: DispatcherPrerequisites, fallback: ExecutorServiceConfigurator) extends ExecutorServiceConfigurator(config, prerequisites) {

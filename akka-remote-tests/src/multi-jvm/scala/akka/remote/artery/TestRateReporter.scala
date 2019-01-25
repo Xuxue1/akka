@@ -1,10 +1,10 @@
-/**
- * Copyright (C) 2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2016-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.remote.artery
 
 import java.util.concurrent.TimeUnit.SECONDS
-import java.util.concurrent.Executors
 
 class TestRateReporter(name: String) extends RateReporter(
   SECONDS.toNanos(1),

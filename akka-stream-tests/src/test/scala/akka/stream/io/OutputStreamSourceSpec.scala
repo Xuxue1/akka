@@ -1,29 +1,35 @@
-/**
- * Copyright (C) 2015-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2015-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.io
 
 import java.io.IOException
 import java.lang.management.ManagementFactory
 import java.util.concurrent.TimeoutException
+
 import akka.actor.ActorSystem
-import akka.stream._
 import akka.stream.Attributes.inputBuffer
+import akka.stream._
+import akka.stream.impl.{ PhasedFusingActorMaterializer, StreamSupervisor }
 import akka.stream.impl.StreamSupervisor.Children
 import akka.stream.impl.io.OutputStreamSourceStage
-import akka.stream.impl.{ ActorMaterializerImpl, StreamSupervisor }
-import akka.stream.scaladsl.{ Keep, StreamConverters, Sink }
+import akka.stream.scaladsl.{ Keep, Sink, StreamConverters }
 import akka.stream.testkit.Utils._
+import akka.stream.testkit.scaladsl.StreamTestKit._
 import akka.stream.testkit._
 import akka.stream.testkit.scaladsl.TestSink
 import akka.testkit.TestProbe
 import akka.util.ByteString
+
+import scala.concurrent.Await
+import scala.concurrent.Future
 import scala.concurrent.duration.Duration.Zero
 import scala.concurrent.duration._
-import scala.concurrent.{ Await, Future }
 import scala.util.Random
 
 class OutputStreamSourceSpec extends StreamSpec(UnboundedMailboxConfig) {
+
   import system.dispatcher
 
   val settings = ActorMaterializerSettings(system).withDispatcher("akka.actor.default-dispatcher")
@@ -134,7 +140,7 @@ class OutputStreamSourceSpec extends StreamSpec(UnboundedMailboxConfig) {
 
       try {
         StreamConverters.asOutputStream().runWith(TestSink.probe[ByteString])(materializer)
-        materializer.asInstanceOf[ActorMaterializerImpl].supervisor.tell(StreamSupervisor.GetChildren, testActor)
+        materializer.asInstanceOf[PhasedFusingActorMaterializer].supervisor.tell(StreamSupervisor.GetChildren, testActor)
         val ref = expectMsgType[Children].children.find(_.path.toString contains "outputStreamSource").get
         assertDispatcher(ref, "akka.stream.default-blocking-io-dispatcher")
       } finally shutdown(sys)
@@ -156,7 +162,10 @@ class OutputStreamSourceSpec extends StreamSpec(UnboundedMailboxConfig) {
 
       s.cancel()
       sourceProbe.expectMsg(GraphStageMessages.DownstreamFinish)
-      the[Exception] thrownBy outputStream.write(bytesArray) shouldBe a[IOException]
+
+      awaitAssert {
+        the[Exception] thrownBy outputStream.write(bytesArray) shouldBe a[IOException]
+      }
     }
 
     "fail to materialize with zero sized input buffer" in {
@@ -204,5 +213,27 @@ class OutputStreamSourceSpec extends StreamSpec(UnboundedMailboxConfig) {
 
       assertNoBlockedThreads()
     }
+
+    "correctly complete the stage after close" in assertAllStagesStopped {
+      // actually this was a race, so it only happened in at least one of 20 runs
+
+      val bufSize = 4
+      val sourceProbe = TestProbe()
+      val (outputStream, probe) = StreamConverters.asOutputStream(timeout)
+        .addAttributes(Attributes.inputBuffer(bufSize, bufSize))
+        .toMat(TestSink.probe[ByteString])(Keep.both).run
+
+      // fill the buffer up
+      (1 to (bufSize - 1)).foreach(outputStream.write)
+      Future {
+        outputStream.close()
+      }
+      // here is the race, has the elements reached the stage buffer yet?
+      Thread.sleep(500)
+      probe.request(bufSize - 1)
+      probe.expectNextN(bufSize - 1)
+      probe.expectComplete()
+    }
+
   }
 }

@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2016-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.remote.artery
 
 import akka.stream.Attributes
@@ -12,13 +13,13 @@ import akka.stream.stage.OutHandler
 
 /**
  * Emits integers from 1 to the given `elementCount`. The `java.lang.Integer`
- * objects are allocated in the constructor of the stage, so it should be created
+ * objects are allocated in the constructor of the operator, so it should be created
  * before the benchmark is started.
  */
 class BenchTestSource(elementCount: Int) extends GraphStage[SourceShape[java.lang.Integer]] {
 
-  private val elements = Array.ofDim[java.lang.Integer](elementCount)
-  (1 to elementCount).map(n => elements(n - 1) = n)
+  private val elements = new Array[java.lang.Integer](elementCount)
+  (1 to elementCount).map(n ⇒ elements(n - 1) = n)
 
   val out: Outlet[java.lang.Integer] = Outlet("BenchTestSource")
   override val shape: SourceShape[java.lang.Integer] = SourceShape(out)

@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.contrib.jul
 
 import akka.event.Logging._
@@ -21,6 +22,7 @@ import akka.event.LoggerMessageQueueSemantics
  *
  * For `Actor`s, use `ActorLogging` instead.
  */
+@deprecated("Feel free to copy", "2.5.0")
 trait JavaLogging {
 
   @transient
@@ -32,6 +34,7 @@ trait JavaLogging {
 /**
  * `java.util.logging` logger.
  */
+@deprecated("Use akka.event.jul.JavaLogger in akka-actor instead", "2.5.0")
 class JavaLogger extends Actor with RequiresMessageQueue[LoggerMessageQueueSemantics] {
 
   def receive = {
@@ -43,7 +46,7 @@ class JavaLogger extends Actor with RequiresMessageQueue[LoggerMessageQueueSeman
   }
 
   @inline
-  def log(level: logging.Level, cause: Throwable, event: LogEvent) {
+  def log(level: logging.Level, cause: Throwable, event: LogEvent): Unit = {
     val logger = logging.Logger.getLogger(event.logSource)
     val record = new logging.LogRecord(level, String.valueOf(event.message))
     record.setLoggerName(logger.getName)
@@ -55,6 +58,7 @@ class JavaLogger extends Actor with RequiresMessageQueue[LoggerMessageQueueSeman
   }
 }
 
+@deprecated("Feel free to copy", "2.5.0")
 trait JavaLoggingAdapter extends LoggingAdapter {
 
   def logger: logging.Logger
@@ -86,7 +90,7 @@ trait JavaLoggingAdapter extends LoggingAdapter {
     log(logging.Level.CONFIG, null, message)
 
   @inline
-  def log(level: logging.Level, cause: Throwable, message: String) {
+  def log(level: logging.Level, cause: Throwable, message: String): Unit = {
     val record = new logging.LogRecord(level, message)
     record.setLoggerName(logger.getName)
     record.setThrown(cause)
@@ -94,15 +98,13 @@ trait JavaLoggingAdapter extends LoggingAdapter {
 
     if (loggingExecutionContext.isDefined) {
       implicit val context = loggingExecutionContext.get
-      Future(logger.log(record)).onFailure {
-        case thrown: Throwable ⇒ thrown.printStackTrace()
-      }
+      Future(logger.log(record)).failed.foreach { _.printStackTrace() }
     } else
       logger.log(record)
   }
 
   // it is unfortunate that this workaround is needed
-  private def updateSource(record: logging.LogRecord) {
+  private def updateSource(record: logging.LogRecord): Unit = {
     val stack = Thread.currentThread.getStackTrace
     val source = stack.find {
       frame ⇒

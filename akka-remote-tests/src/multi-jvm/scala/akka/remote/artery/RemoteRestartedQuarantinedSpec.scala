@@ -1,26 +1,19 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.remote.artery
 
-import akka.remote.transport.AssociationHandle
-
-import language.postfixOps
-import scala.concurrent.duration._
-import com.typesafe.config.ConfigFactory
-import akka.actor._
+import akka.actor.{ ActorIdentity, Identify, _ }
 import akka.remote.testconductor.RoleName
-import akka.remote.transport.ThrottlerTransportAdapter.{ Direction, ForceDisassociate, ForceDisassociateExplicitly }
 import akka.remote.testkit.MultiNodeConfig
-import akka.remote.testkit.MultiNodeSpec
-import akka.remote.testkit.STMultiNodeSpec
+import akka.remote.{ AddressUidExtension, RARP, RemotingMultiNodeSpec, ThisActorSystemQuarantinedEvent }
 import akka.testkit._
-import akka.actor.ActorIdentity
-import akka.remote.testconductor.RoleName
-import akka.actor.Identify
+import com.typesafe.config.ConfigFactory
 
 import scala.concurrent.Await
-import akka.remote.{ AddressUidExtension, RemotingMultiNodeSpec, RARP, ThisActorSystemQuarantinedEvent }
+import scala.concurrent.duration._
+import scala.language.postfixOps
 
 object RemoteRestartedQuarantinedSpec extends MultiNodeConfig {
   val first = role("first")
@@ -31,7 +24,7 @@ object RemoteRestartedQuarantinedSpec extends MultiNodeConfig {
       akka.loglevel = WARNING
       akka.remote.log-remote-lifecycle-events = WARNING
       akka.remote.artery.enabled = on
-      """)).withFallback(RemotingMultiNodeSpec.arteryFlightRecordingConf))
+      """)).withFallback(RemotingMultiNodeSpec.commonConfig))
 
   class Subject extends Actor {
     def receive = {
@@ -89,7 +82,7 @@ abstract class RemoteRestartedQuarantinedSpec extends RemotingMultiNodeSpec(Remo
       }
 
       runOn(second) {
-        val addr = system.asInstanceOf[ExtendedActorSystem].provider.getDefaultAddress
+        val address = system.asInstanceOf[ExtendedActorSystem].provider.getDefaultAddress
         val firstAddress = node(first).address
         system.eventStream.subscribe(testActor, classOf[ThisActorSystemQuarantinedEvent])
 
@@ -114,7 +107,7 @@ abstract class RemoteRestartedQuarantinedSpec extends RemotingMultiNodeSpec(Remo
         Await.result(system.whenTerminated, 10.seconds)
 
         val freshSystem = ActorSystem(system.name, ConfigFactory.parseString(s"""
-              akka.remote.artery.canonical.port = ${addr.port.get}
+              akka.remote.artery.canonical.port = ${address.port.get}
               """).withFallback(system.settings.config))
 
         val probe = TestProbe()(freshSystem)

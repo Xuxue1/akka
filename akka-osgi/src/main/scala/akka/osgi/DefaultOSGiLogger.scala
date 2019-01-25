@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.osgi
 
 import akka.event.Logging
@@ -20,7 +21,7 @@ class DefaultOSGiLogger extends DefaultLogger {
   override def receive: Receive = uninitialisedReceive.orElse[Any, Unit](super.receive)
 
   /**
-   * Behaviour of the logger that waits for its LogService
+   * Behavior of the logger that waits for its LogService
    * @return  Receive: Store LogEvent or become initialised
    */
   def uninitialisedReceive: Receive = {
@@ -33,7 +34,7 @@ class DefaultOSGiLogger extends DefaultLogger {
      *
      * @param logService OSGi LogService that has been registered,
      */
-    def setLogService(logService: LogService) {
+    def setLogService(logService: LogService): Unit = {
       messagesToLog.foreach(x ⇒ {
         logMessage(logService, x)
       })
@@ -47,7 +48,7 @@ class DefaultOSGiLogger extends DefaultLogger {
   }
 
   /**
-   * Behaviour of the Event handler that is setup (has received a LogService)
+   * Behavior of the Event handler that is setup (has received a LogService)
    * @param logService registered OSGi LogService
    * @return Receive : Logs LogEvent or go back to the uninitialised state
    */
@@ -67,7 +68,7 @@ class DefaultOSGiLogger extends DefaultLogger {
    * @param logService  OSGi LogService registered and used for logging
    * @param event akka LogEvent that is logged using the LogService
    */
-  def logMessage(logService: LogService, event: LogEvent) {
+  def logMessage(logService: LogService, event: LogEvent): Unit = {
     event match {
       case error: Logging.Error if error.cause != NoCause ⇒
         logService.log(event.level.asInt, messageFormat.format(timestamp(event), event.thread.getName, event.logSource, event.message), error.cause)

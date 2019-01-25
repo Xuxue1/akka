@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.routing
 
 import java.util.concurrent.atomic.AtomicLong
@@ -27,7 +28,7 @@ final class RoundRobinRoutingLogic extends RoutingLogic {
     if (routees.nonEmpty) {
       val size = routees.size
       val index = (next.getAndIncrement % size).asInstanceOf[Int]
-      routees(if (index < 0) size + index - 1 else index)
+      routees(if (index < 0) size + index else index)
     } else NoRoutee
 
 }
@@ -65,7 +66,7 @@ final class RoundRobinRoutingLogic extends RoutingLogic {
  */
 @SerialVersionUID(1L)
 final case class RoundRobinPool(
-  override val nrOfInstances: Int, override val resizer: Option[Resizer] = None,
+  val nrOfInstances: Int, override val resizer: Option[Resizer] = None,
   override val supervisorStrategy: SupervisorStrategy = Pool.defaultSupervisorStrategy,
   override val routerDispatcher:   String             = Dispatchers.DefaultDispatcherId,
   override val usePoolDispatcher:  Boolean            = false)
@@ -128,7 +129,7 @@ final case class RoundRobinPool(
  */
 @SerialVersionUID(1L)
 final case class RoundRobinGroup(
-  override val paths:            immutable.Iterable[String],
+  val paths:                     immutable.Iterable[String],
   override val routerDispatcher: String                     = Dispatchers.DefaultDispatcherId)
   extends Group {
 

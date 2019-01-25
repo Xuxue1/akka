@@ -1,18 +1,20 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.impl
 
 import akka.stream.{ AbruptTerminationException, ActorMaterializerSettings }
 
 import scala.collection.immutable
 import akka.actor._
+import akka.annotation.{ DoNotInherit, InternalApi }
 import org.reactivestreams.Subscription
 
 /**
  * INTERNAL API
  */
-object FanOut {
+@InternalApi private[akka] object FanOut {
 
   final case class SubstreamRequestMore(id: Int, demand: Long) extends DeadLetterSuppression with NoSerializationVerificationNeeded
   final case class SubstreamCancel(id: Int) extends DeadLetterSuppression with NoSerializationVerificationNeeded
@@ -35,14 +37,14 @@ object FanOut {
 
     private val outputs = Array.tabulate(outputCount)(new FanoutOutputs(_, impl, pump))
 
-    private val marked = Array.ofDim[Boolean](outputCount)
+    private val marked = new Array[Boolean](outputCount)
     private var markedCount = 0
-    private val pending = Array.ofDim[Boolean](outputCount)
+    private val pending = new Array[Boolean](outputCount)
     private var markedPending = 0
-    private val cancelled = Array.ofDim[Boolean](outputCount)
+    private val cancelled = new Array[Boolean](outputCount)
     private var markedCancelled = 0
-    private val completed = Array.ofDim[Boolean](outputCount)
-    private val errored = Array.ofDim[Boolean](outputCount)
+    private val completed = new Array[Boolean](outputCount)
+    private val errored = new Array[Boolean](outputCount)
 
     override def toString: String =
       s"""|OutputBunch
@@ -247,7 +249,7 @@ object FanOut {
 /**
  * INTERNAL API
  */
-abstract class FanOut(val settings: ActorMaterializerSettings, val outputCount: Int) extends Actor with ActorLogging with Pump {
+@DoNotInherit private[akka] abstract class FanOut(val settings: ActorMaterializerSettings, val outputCount: Int) extends Actor with ActorLogging with Pump {
   import FanOut._
 
   protected val outputBunch = new OutputBunch(outputCount, self, this)
@@ -287,7 +289,7 @@ abstract class FanOut(val settings: ActorMaterializerSettings, val outputCount: 
 /**
  * INTERNAL API
  */
-private[akka] object Unzip {
+@InternalApi private[akka] object Unzip {
   def props(settings: ActorMaterializerSettings): Props =
     Props(new Unzip(settings)).withDeploy(Deploy.local)
 }
@@ -295,7 +297,7 @@ private[akka] object Unzip {
 /**
  * INTERNAL API
  */
-private[akka] class Unzip(_settings: ActorMaterializerSettings) extends FanOut(_settings, outputCount = 2) {
+@InternalApi private[akka] class Unzip(_settings: ActorMaterializerSettings) extends FanOut(_settings, outputCount = 2) {
   outputBunch.markAllOutputs()
 
   initialPhase(1, TransferPhase(primaryInputs.NeedsInput && outputBunch.AllOfMarkedOutputs) { () ⇒

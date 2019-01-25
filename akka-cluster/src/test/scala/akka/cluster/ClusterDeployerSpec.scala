@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.cluster
 
 import akka.testkit._
@@ -34,6 +35,7 @@ object ClusterDeployerSpec {
         }
       }
       akka.remote.netty.tcp.port = 0
+      akka.remote.artery.canonical.port = 0
       """, ConfigParseOptions.defaults)
 
   class RecipeActor extends Actor {
@@ -56,7 +58,7 @@ class ClusterDeployerSpec extends AkkaSpec(ClusterDeployerSpec.deployerConf) {
           service,
           deployment.get.config,
           ClusterRouterPool(RoundRobinPool(20), ClusterRouterPoolSettings(
-            totalInstances = 20, maxInstancesPerNode = 3, allowLocalRoutees = false, useRole = None)),
+            totalInstances = 20, maxInstancesPerNode = 3, allowLocalRoutees = false)),
           ClusterScope,
           Deploy.NoDispatcherGiven,
           Deploy.NoMailboxGiven)))
@@ -72,16 +74,10 @@ class ClusterDeployerSpec extends AkkaSpec(ClusterDeployerSpec.deployerConf) {
           service,
           deployment.get.config,
           ClusterRouterGroup(RoundRobinGroup(List("/user/myservice")), ClusterRouterGroupSettings(
-            totalInstances = 20, routeesPaths = List("/user/myservice"), allowLocalRoutees = false, useRole = None)),
+            totalInstances = 20, routeesPaths = List("/user/myservice"), allowLocalRoutees = false)),
           ClusterScope,
           "mydispatcher",
           "mymailbox")))
-    }
-
-    "have correct router mappings" in {
-      val mapping = system.asInstanceOf[ActorSystemImpl].provider.deployer.routerTypeMapping
-      mapping("adaptive-pool") should ===(classOf[akka.cluster.routing.AdaptiveLoadBalancingPool].getName)
-      mapping("adaptive-group") should ===(classOf[akka.cluster.routing.AdaptiveLoadBalancingGroup].getName)
     }
 
   }

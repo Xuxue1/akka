@@ -1,31 +1,20 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.cluster.singleton
 
-import language.postfixOps
-import scala.collection.immutable
 import scala.concurrent.duration._
 import com.typesafe.config.ConfigFactory
 import akka.actor.Actor
-import akka.actor.ActorLogging
 import akka.actor.ActorRef
-import akka.actor.Address
 import akka.actor.Props
-import akka.actor.PoisonPill
-import akka.actor.RootActorPath
 import akka.cluster.Cluster
-import akka.cluster.ClusterEvent._
-import akka.cluster.Member
 import akka.remote.testconductor.RoleName
 import akka.remote.testkit.MultiNodeConfig
 import akka.remote.testkit.MultiNodeSpec
 import akka.remote.testkit.STMultiNodeSpec
 import akka.testkit._
-import akka.testkit.TestEvent._
-import akka.actor.Terminated
-import akka.actor.ActorSelection
 import akka.cluster.MemberStatus
 
 object ClusterSingletonManagerLeaveSpec extends MultiNodeConfig {
@@ -89,12 +78,14 @@ class ClusterSingletonManagerLeaveSpec extends MultiNodeSpec(ClusterSingletonMan
       name = "echo")
   }
 
+  val echoProxyTerminatedProbe = TestProbe()
+
   lazy val echoProxy: ActorRef = {
-    system.actorOf(
+    echoProxyTerminatedProbe.watch(system.actorOf(
       ClusterSingletonProxy.props(
         singletonManagerPath = "/user/echo",
         settings = ClusterSingletonProxySettings(system)),
-      name = "echoProxy")
+      name = "echoProxy"))
   }
 
   "Leaving ClusterSingletonManager" must {
@@ -130,8 +121,13 @@ class ClusterSingletonManagerLeaveSpec extends MultiNodeSpec(ClusterSingletonMan
       }
 
       runOn(first) {
+        cluster.registerOnMemberRemoved(testActor ! "MemberRemoved")
         expectMsg(10.seconds, "stop")
         expectMsg("postStop")
+        // CoordinatedShutdown makes sure that singleton actors are
+        // stopped before Cluster shutdown
+        expectMsg("MemberRemoved")
+        echoProxyTerminatedProbe.expectTerminated(echoProxy, 10.seconds)
       }
       enterBarrier("first-stopped")
 
@@ -153,13 +149,13 @@ class ClusterSingletonManagerLeaveSpec extends MultiNodeSpec(ClusterSingletonMan
       }
       enterBarrier("second-working")
 
-      runOn(third) {
-        cluster.leave(node(second).address)
-      }
-
       runOn(second) {
+        cluster.registerOnMemberRemoved(testActor ! "MemberRemoved")
+        cluster.leave(node(second).address)
         expectMsg(15.seconds, "stop")
         expectMsg("postStop")
+        expectMsg("MemberRemoved")
+        echoProxyTerminatedProbe.expectTerminated(echoProxy, 10.seconds)
       }
       enterBarrier("second-stopped")
 
@@ -169,12 +165,12 @@ class ClusterSingletonManagerLeaveSpec extends MultiNodeSpec(ClusterSingletonMan
       enterBarrier("third-started")
 
       runOn(third) {
+        cluster.registerOnMemberRemoved(testActor ! "MemberRemoved")
         cluster.leave(node(third).address)
-      }
-
-      runOn(third) {
         expectMsg(5.seconds, "stop")
         expectMsg("postStop")
+        expectMsg("MemberRemoved")
+        echoProxyTerminatedProbe.expectTerminated(echoProxy, 10.seconds)
       }
       enterBarrier("third-stopped")
 

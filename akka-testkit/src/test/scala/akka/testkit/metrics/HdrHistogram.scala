@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.testkit.metrics
 
 import com.codahale.metrics.Metric
@@ -23,7 +24,7 @@ private[akka] class HdrHistogram(
 
   private val hist = new hdr.Histogram(highestTrackableValue, numberOfSignificantValueDigits)
 
-  def update(value: Long) {
+  def update(value: Long): Unit = {
     try
       hist.recordValue(value)
     catch {
@@ -31,7 +32,7 @@ private[akka] class HdrHistogram(
     }
   }
 
-  def updateWithCount(value: Long, count: Long) {
+  def updateWithCount(value: Long, count: Long): Unit = {
     try
       hist.recordValueWithCount(value, count)
     catch {

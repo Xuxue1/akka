@@ -1,10 +1,11 @@
-/**
- * Copyright (C) 2015-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2015-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream
 
 /**
- * Represents a mode that decides how to deal exceed rate for Throttle combinator
+ * Represents a mode that decides how to deal exceed rate for Throttle operator
  */
 sealed abstract class ThrottleMode
 

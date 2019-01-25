@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.remote.testconductor
 
 import language.postfixOps
@@ -324,9 +325,9 @@ private[akka] class ServerFSM(val controller: ActorRef, val channel: Channel) ex
   }
 
   when(Initial, stateTimeout = 10 seconds) {
-    case Event(Hello(name, addr), _) ⇒
+    case Event(Hello(name, address), _) ⇒
       roleName = RoleName(name)
-      controller ! NodeInfo(roleName, addr, self)
+      controller ! NodeInfo(roleName, address, self)
       goto(Ready)
     case Event(x: NetworkOp, _) ⇒
       log.warning("client {} sent no Hello in first message (instead {}), disconnecting", getAddrString(channel), x)
@@ -426,7 +427,7 @@ private[akka] class Controller(private var initialParticipants: Int, controllerP
       val (ip, port) = channel.getRemoteAddress match { case s: InetSocketAddress ⇒ (s.getAddress.getHostAddress, s.getPort) }
       val name = ip + ":" + port + "-server" + generation.next
       sender() ! context.actorOf(Props(classOf[ServerFSM], self, channel).withDeploy(Deploy.local), name)
-    case c @ NodeInfo(name, addr, fsm) ⇒
+    case c @ NodeInfo(name, address, fsm) ⇒
       barrier forward c
       if (nodes contains name) {
         if (initialParticipants > 0) {
@@ -442,7 +443,7 @@ private[akka] class Controller(private var initialParticipants: Int, controllerP
           initialParticipants = 0
         }
         if (addrInterest contains name) {
-          addrInterest(name) foreach (_ ! ToClient(AddressReply(name, addr)))
+          addrInterest(name) foreach (_ ! ToClient(AddressReply(name, address)))
           addrInterest -= name
         }
       }
@@ -477,7 +478,7 @@ private[akka] class Controller(private var initialParticipants: Int, controllerP
     case GetSockAddr ⇒ sender() ! connection.getLocalAddress
   }
 
-  override def postStop() {
+  override def postStop(): Unit = {
     RemoteConnection.shutdown(connection)
   }
 }
@@ -532,8 +533,8 @@ private[akka] class BarrierCoordinator extends Actor with LoggingFSM[BarrierCoor
   // this shall be set to true if all subsequent barriers shall fail
   var failed = false
 
-  override def preRestart(reason: Throwable, message: Option[Any]) {}
-  override def postRestart(reason: Throwable) { failed = true }
+  override def preRestart(reason: Throwable, message: Option[Any]): Unit = {}
+  override def postRestart(reason: Throwable): Unit = { failed = true }
 
   // TODO what happens with the other waiting players in case of a test failure?
 

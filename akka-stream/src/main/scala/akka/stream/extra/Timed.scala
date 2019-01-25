@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.extra
 
 import java.util.concurrent.atomic.AtomicLong
@@ -11,7 +12,6 @@ import akka.stream.scaladsl.{ Flow, Source }
 import akka.stream.stage._
 
 import scala.concurrent.duration._
-import scala.language.existentials
 
 /**
  * Provides operations needed to implement the `timed` DSL
@@ -147,7 +147,7 @@ object Timed extends TimedOps with TimedIntervalBetweenOps {
         completeStage()
       }
 
-      private def stopTime() {
+      private def stopTime(): Unit = {
         val d = timedContext.stop()
         _onComplete(d)
       }

@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.cluster
 
 import language.postfixOps
@@ -10,9 +11,7 @@ import akka.remote.testkit.MultiNodeConfig
 import akka.remote.testkit.MultiNodeSpec
 import akka.testkit._
 import scala.concurrent.duration._
-import akka.actor.Address
 import scala.concurrent.duration._
-import scala.collection.immutable
 import akka.remote.transport.ThrottlerTransportAdapter.Direction
 
 final case class SplitBrainMultiNodeConfig(failureDetectorPuppet: Boolean) extends MultiNodeConfig {

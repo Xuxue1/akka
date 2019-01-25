@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.actor;
 
 import akka.testkit.AkkaJUnitActorSystemResource;
@@ -13,8 +14,9 @@ import static org.junit.Assert.*;
 
 public class JavaExtension extends JUnitSuite {
 
-  static class TestExtensionId extends AbstractExtensionId<TestExtension> implements ExtensionIdProvider {
-    public final static TestExtensionId TestExtensionProvider = new TestExtensionId();
+  static class TestExtensionId extends AbstractExtensionId<TestExtension>
+      implements ExtensionIdProvider {
+    public static final TestExtensionId TestExtensionProvider = new TestExtensionId();
 
     public ExtensionId<TestExtension> lookup() {
       return TestExtensionId.TestExtensionProvider;
@@ -33,9 +35,24 @@ public class JavaExtension extends JUnitSuite {
     }
   }
 
+  static class OtherExtensionId extends AbstractExtensionId<OtherExtension>
+      implements ExtensionIdProvider {
+
+    public static final OtherExtensionId OtherExtensionProvider = new OtherExtensionId();
+
+    @Override
+    public ExtensionId<OtherExtension> lookup() {
+      return OtherExtensionId.OtherExtensionProvider;
+    }
+
+    @Override
+    public OtherExtension createExtension(ExtendedActorSystem system) {
+      return new OtherExtension(system);
+    }
+  }
+
   static class OtherExtension implements Extension {
-    static final ExtensionKey<OtherExtension> key = new ExtensionKey<OtherExtension>(OtherExtension.class) {
-    };
+    static final ExtensionId<OtherExtension> key = OtherExtensionId.OtherExtensionProvider;
 
     public final ExtendedActorSystem system;
 
@@ -46,9 +63,11 @@ public class JavaExtension extends JUnitSuite {
 
   @ClassRule
   public static AkkaJUnitActorSystemResource actorSystemResource =
-    new AkkaJUnitActorSystemResource("JavaExtension",
-      ConfigFactory.parseString("akka.extensions = [ \"akka.actor.JavaExtension$TestExtensionId\" ]")
-      .withFallback(AkkaSpec.testConf()));
+      new AkkaJUnitActorSystemResource(
+          "JavaExtension",
+          ConfigFactory.parseString(
+                  "akka.extensions = [ \"akka.actor.JavaExtension$TestExtensionId\" ]")
+              .withFallback(AkkaSpec.testConf()));
 
   private final ActorSystem system = actorSystemResource.getSystem();
 
@@ -63,5 +82,4 @@ public class JavaExtension extends JUnitSuite {
   public void mustBeAdHoc() {
     assertSame(OtherExtension.key.apply(system).system, system);
   }
-
 }

@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2015-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2015-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.tck
 
 import java.util.concurrent.TimeoutException
@@ -13,6 +14,7 @@ import akka.event.Logging
 import akka.testkit.TestEvent
 import akka.testkit.EventFilter
 import org.testng.annotations.BeforeClass
+import scala.concurrent.Await
 
 trait ActorSystemLifecycle {
 
@@ -31,8 +33,7 @@ trait ActorSystemLifecycle {
   @AfterClass
   def shutdownActorSystem(): Unit = {
     try {
-      system.terminate()
-      system.awaitTermination(shutdownTimeout)
+      Await.ready(system.terminate(), shutdownTimeout)
     } catch {
       case _: TimeoutException ⇒
         val msg = "Failed to stop [%s] within [%s] \n%s".format(system.name, shutdownTimeout,

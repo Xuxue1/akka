@@ -1,33 +1,34 @@
-/**
- * Copyright (C) 2014-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2014-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.scaladsl
+
+import java.util.concurrent.ThreadLocalRandom
 
 import akka.NotUsed
 import akka.actor._
-import akka.stream.Supervision._
 import akka.stream.impl._
-import akka.stream.impl.fusing.ActorGraphInterpreter
-import akka.stream.impl.fusing.GraphInterpreter.GraphAssembly
-import akka.stream.stage.AbstractStage.PushPullGraphStage
-import akka.stream.testkit.Utils._
+import akka.stream.testkit.scaladsl.StreamTestKit._
 import akka.stream.testkit._
 import akka.stream._
-import akka.testkit.TestEvent.{ Mute, UnMute }
-import akka.testkit.{ EventFilter, TestDuration }
+import akka.testkit.TestDuration
 import com.typesafe.config.ConfigFactory
 import org.reactivestreams.{ Publisher, Subscriber }
-import org.scalatest.concurrent.ScalaFutures
+
 import scala.collection.immutable
 import scala.concurrent.Await
 import scala.concurrent.duration._
 import scala.util.control.NoStackTrace
-import akka.stream.impl.fusing.GraphInterpreterShell
 
 object FlowSpec {
   class Fruit
   class Apple extends Fruit
-  val apples = () ⇒ Iterator.continually(new Apple)
+  class Orange extends Fruit
+  val fruits = () ⇒ new Iterator[Fruit] {
+    override def hasNext: Boolean = true
+    override def next(): Fruit = if (ThreadLocalRandom.current().nextBoolean()) new Apple else new Orange
+  }
 
 }
 
@@ -41,47 +42,6 @@ class FlowSpec extends StreamSpec(ConfigFactory.parseString("akka.actor.debug.re
 
   val identity: Flow[Any, Any, NotUsed] ⇒ Flow[Any, Any, NotUsed] = in ⇒ in.map(e ⇒ e)
   val identity2: Flow[Any, Any, NotUsed] ⇒ Flow[Any, Any, NotUsed] = in ⇒ identity(in)
-
-  class BrokenActorInterpreter(_shell: GraphInterpreterShell, brokenMessage: Any)
-    extends ActorGraphInterpreter(_shell) {
-
-    override protected[akka] def aroundReceive(receive: Receive, msg: Any) = {
-      msg match {
-        case ActorGraphInterpreter.OnNext(_, 0, m) if m == brokenMessage ⇒
-          throw new NullPointerException(s"I'm so broken [$m]")
-        case _ ⇒ super.aroundReceive(receive, msg)
-      }
-    }
-  }
-
-  val faultyFlow: Flow[Any, Any, NotUsed] ⇒ Flow[Any, Any, NotUsed] = in ⇒ in.via({
-    val stage = fusing.Map({ x: Any ⇒ x })
-
-    val assembly = new GraphAssembly(
-      Array(stage),
-      Array(Attributes.none),
-      Array(stage.shape.in, null),
-      Array(0, -1),
-      Array(null, stage.shape.out),
-      Array(-1, 0))
-
-    val (connections, logics) =
-      assembly.materialize(Attributes.none, assembly.stages.map(_.module), new java.util.HashMap, _ ⇒ ())
-
-    val shell = new GraphInterpreterShell(assembly, connections, logics, stage.shape, settings,
-      materializer.asInstanceOf[ActorMaterializerImpl])
-
-    val props = Props(new BrokenActorInterpreter(shell, "a3"))
-      .withDispatcher("akka.test.stream-dispatcher").withDeploy(Deploy.local)
-    val impl = system.actorOf(props, "borken-stage-actor")
-
-    val subscriber = new ActorGraphInterpreter.BoundarySubscriber(impl, shell, 0)
-    val publisher = new ActorPublisher[Any](impl) { override val wakeUpMsg = ActorGraphInterpreter.SubscribePending(shell, 0) }
-
-    impl ! ActorGraphInterpreter.ExposedPublisher(shell, 0, publisher)
-
-    Flow.fromSinkAndSource(Sink.fromSubscriber(subscriber), Source.fromPublisher(publisher))
-  })
 
   val toPublisher: (Source[Any, _], ActorMaterializer) ⇒ Publisher[Any] =
     (f, m) ⇒ f.runWith(Sink.asPublisher(false))(m)
@@ -295,11 +255,11 @@ class FlowSpec extends StreamSpec(ConfigFactory.parseString("akka.actor.debug.re
     }
 
     "be covariant" in {
-      val f1: Source[Fruit, _] = Source.fromIterator[Fruit](apples)
-      val p1: Publisher[Fruit] = Source.fromIterator[Fruit](apples).runWith(Sink.asPublisher(false))
-      val f2: SubFlow[Fruit, _, Source[Fruit, NotUsed]#Repr, _] = Source.fromIterator[Fruit](apples).splitWhen(_ ⇒ true)
-      val f3: SubFlow[Fruit, _, Source[Fruit, NotUsed]#Repr, _] = Source.fromIterator[Fruit](apples).groupBy(2, _ ⇒ true)
-      val f4: Source[(immutable.Seq[Fruit], Source[Fruit, _]), _] = Source.fromIterator[Fruit](apples).prefixAndTail(1)
+      val f1: Source[Fruit, _] = Source.fromIterator[Fruit](fruits)
+      val p1: Publisher[Fruit] = Source.fromIterator[Fruit](fruits).runWith(Sink.asPublisher(false))
+      val f2: SubFlow[Fruit, _, Source[Fruit, NotUsed]#Repr, _] = Source.fromIterator[Fruit](fruits).splitWhen(_ ⇒ true)
+      val f3: SubFlow[Fruit, _, Source[Fruit, NotUsed]#Repr, _] = Source.fromIterator[Fruit](fruits).groupBy(2, _ ⇒ true)
+      val f4: Source[(immutable.Seq[Fruit], Source[Fruit, _]), _] = Source.fromIterator[Fruit](fruits).prefixAndTail(1)
       val d1: SubFlow[Fruit, _, Flow[String, Fruit, NotUsed]#Repr, _] = Flow[String].map(_ ⇒ new Apple).splitWhen(_ ⇒ true)
       val d2: SubFlow[Fruit, _, Flow[String, Fruit, NotUsed]#Repr, _] = Flow[String].map(_ ⇒ new Apple).groupBy(2, _ ⇒ true)
       val d3: Flow[String, (immutable.Seq[Apple], Source[Fruit, _]), _] = Flow[String].map(_ ⇒ new Apple).prefixAndTail(1)
@@ -317,6 +277,31 @@ class FlowSpec extends StreamSpec(ConfigFactory.parseString("akka.actor.debug.re
         Source(1 to 10).via(identity2).limit(100).runWith(Sink.seq),
         3.seconds) should ===(1 to 10)
     }
+
+    "eliminate passed in when matval from passed in not used" in {
+      val map = Flow.fromFunction((n: Int) ⇒ n + 1)
+      val result = map.viaMat(Flow[Int])(Keep.left)
+      result shouldBe theSameInstanceAs(map)
+    }
+
+    "not eliminate passed in when matval from passed in is used" in {
+      val map = Flow.fromFunction((n: Int) ⇒ n + 1)
+      val result = map.viaMat(Flow[Int])(Keep.right)
+      result shouldNot be theSameInstanceAs (map)
+    }
+
+    "eliminate itself if identity" in {
+      val map = Flow.fromFunction((n: Int) ⇒ n + 1)
+      val result = Flow[Int].viaMat(map)(Keep.right)
+      result shouldBe theSameInstanceAs(map)
+    }
+
+    "not eliminate itself if identity but matval is used" in {
+      val map = Flow.fromFunction((n: Int) ⇒ n + 1)
+      val result = Flow[Int].viaMat(map)(Keep.left)
+      result shouldNot be theSameInstanceAs (map)
+    }
+
   }
 
   "A Flow with multiple subscribers (FanOutBox)" must {
@@ -534,67 +519,6 @@ class FlowSpec extends StreamSpec(ConfigFactory.parseString("akka.actor.debug.re
 
     "should be created from a function easily" in {
       Source(0 to 9).via(Flow.fromFunction(_ + 1)).runWith(Sink.seq).futureValue should ===(1 to 10)
-    }
-  }
-
-  "A broken Flow" must {
-    "cancel upstream and call onError on current and future downstream subscribers if an internal error occurs" in {
-      new ChainSetup(faultyFlow, settings.withInputBuffer(initialSize = 1, maxSize = 1), toFanoutPublisher(16)) {
-
-        def checkError(sprobe: TestSubscriber.ManualProbe[Any]): Unit = {
-          val error = sprobe.expectError()
-          error.isInstanceOf[AbruptTerminationException] should be(true)
-          error.getMessage should startWith("Processor actor")
-        }
-
-        val downstream2 = TestSubscriber.manualProbe[Any]()
-        publisher.subscribe(downstream2)
-        val downstream2Subscription = downstream2.expectSubscription()
-
-        downstreamSubscription.request(5)
-        downstream2Subscription.request(5)
-        upstream.expectRequest(upstreamSubscription, 1)
-        upstreamSubscription.sendNext("a1")
-        downstream.expectNext("a1")
-        downstream2.expectNext("a1")
-
-        upstream.expectRequest(upstreamSubscription, 1)
-        upstreamSubscription.sendNext("a2")
-        downstream.expectNext("a2")
-        downstream2.expectNext("a2")
-
-        val filters = immutable.Seq(
-          EventFilter[NullPointerException](),
-          EventFilter[IllegalStateException](),
-          EventFilter[PostRestartException]()) // This is thrown because we attach the dummy failing actor to toplevel
-        try {
-          system.eventStream.publish(Mute(filters))
-
-          upstream.expectRequest(upstreamSubscription, 1)
-          upstreamSubscription.sendNext("a3")
-          upstreamSubscription.expectCancellation()
-
-          // IllegalStateException terminated abruptly
-          checkError(downstream)
-          checkError(downstream2)
-
-          val downstream3 = TestSubscriber.manualProbe[Any]()
-          publisher.subscribe(downstream3)
-          downstream3.expectSubscription()
-          // IllegalStateException terminated abruptly
-          checkError(downstream3)
-        } finally {
-          system.eventStream.publish(UnMute(filters))
-        }
-      }
-    }
-
-    "suitably override attribute handling methods" in {
-      import Attributes._
-      val f: Flow[Int, Int, NotUsed] = Flow[Int].map(_ + 1).async.addAttributes(none).named("name")
-
-      f.module.attributes.getFirst[Name] shouldEqual Some(Name("name"))
-      f.module.attributes.getFirst[Attributes.AsyncBoundary.type] shouldEqual Some(AsyncBoundary)
     }
   }
 

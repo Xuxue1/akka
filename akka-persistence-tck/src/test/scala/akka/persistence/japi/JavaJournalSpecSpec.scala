@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2014-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2014-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.persistence.japi
 
 import akka.persistence.japi.journal.JavaJournalSpec

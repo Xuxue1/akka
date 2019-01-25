@@ -1,9 +1,15 @@
-/**
- * Copyright (C) 2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2016-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.scaladsl
 
-import akka.stream.testkit.Utils._
+//#zip-with-index
+import akka.stream.scaladsl.Source
+import akka.stream.scaladsl.Sink
+
+//#zip-with-index
+import akka.stream.testkit.scaladsl.StreamTestKit._
 import akka.stream.{ ActorMaterializer, ActorMaterializerSettings }
 import akka.stream.testkit.{ StreamSpec, TestSubscriber }
 
@@ -19,7 +25,6 @@ class FlowZipWithIndexSpec extends StreamSpec {
     "work in the happy case" in assertAllStagesStopped {
       val probe = TestSubscriber.manualProbe[(Int, Long)]()
       Source(7 to 10).zipWithIndex.runWith(Sink.fromSubscriber(probe))
-
       val subscription = probe.expectSubscription()
 
       subscription.request(2)
@@ -32,6 +37,15 @@ class FlowZipWithIndexSpec extends StreamSpec {
       probe.expectNext((10, 3L))
 
       probe.expectComplete()
+    }
+
+    "work in fruit example" in {
+      //#zip-with-index
+      Source(List("apple", "orange", "banana"))
+        .zipWithIndex
+        .runWith(Sink.foreach(println))
+      // this will print ('apple', 0), ('orange', 1), ('banana', 2)
+      //#zip-with-index
     }
 
   }

@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.remote
 
 import akka.actor.ActorSystem
@@ -29,7 +30,7 @@ class BoundAddressesExtension(val system: ExtendedActorSystem) extends Extension
    */
   def boundAddresses: Map[String, Set[Address]] = system.provider
     .asInstanceOf[RemoteActorRefProvider].transport match {
-      case artery: ArteryTransport ⇒ Map((ArteryTransport.ProtocolName → Set(artery.bindAddress.address)))
+      case artery: ArteryTransport ⇒ Map(ArteryTransport.ProtocolName → Set(artery.bindAddress.address))
       case remoting: Remoting      ⇒ remoting.boundAddresses
     }
 }

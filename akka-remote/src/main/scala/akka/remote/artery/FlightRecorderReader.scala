@@ -1,3 +1,7 @@
+/*
+ * Copyright (C) 2018-2019 Lightbend Inc. <https://www.lightbend.com>
+ */
+
 package akka.remote.artery
 
 import java.io.{ IOException, RandomAccessFile }
@@ -147,7 +151,7 @@ private[akka] final class FlightRecorderReader(fileChannel: FileChannel) {
           val recordStartOffset = recordOffset + RollingEventLogSection.CommitEntrySize
 
           // FIXME: extract magic numbers
-          val metadata = Array.ofDim[Byte](fileBuffer.getByte(recordStartOffset + 20))
+          val metadata = new Array[Byte](fileBuffer.getByte(recordStartOffset + 20))
           fileBuffer.getBytes(recordStartOffset + 21, metadata)
 
           val entry = RichEntry(

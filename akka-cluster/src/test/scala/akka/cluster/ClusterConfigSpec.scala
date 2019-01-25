@@ -1,13 +1,17 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.cluster
 
 import language.postfixOps
+import scala.concurrent.duration._
+
+import com.typesafe.config.ConfigFactory
+
 import akka.testkit.AkkaSpec
 import akka.dispatch.Dispatchers
-import scala.concurrent.duration._
+
 import akka.remote.PhiAccrualFailureDetector
 import akka.util.Helpers.ConfigOps
 import akka.actor.Address
@@ -28,6 +32,7 @@ class ClusterConfigSpec extends AkkaSpec {
       SeedNodes should ===(Vector.empty[Address])
       SeedNodeTimeout should ===(5 seconds)
       RetryUnsuccessfulJoinAfter should ===(10 seconds)
+      ShutdownAfterUnsuccessfulJoinSeedNodes should ===(Duration.Undefined)
       PeriodicTasksInitialDelay should ===(1 seconds)
       GossipInterval should ===(1 second)
       GossipTimeToLive should ===(2 seconds)
@@ -41,19 +46,29 @@ class ClusterConfigSpec extends AkkaSpec {
       DownRemovalMargin should ===(Duration.Zero)
       MinNrOfMembers should ===(1)
       MinNrOfMembersOfRole should ===(Map.empty[String, Int])
-      Roles should ===(Set.empty[String])
+      SelfDataCenter should ===("default")
+      Roles should ===(Set(ClusterSettings.DcRolePrefix + "default"))
       JmxEnabled should ===(true)
       UseDispatcher should ===(Dispatchers.DefaultDispatcherId)
       GossipDifferentViewProbability should ===(0.8 +- 0.0001)
       ReduceGossipDifferentViewProbability should ===(400)
       SchedulerTickDuration should ===(33 millis)
       SchedulerTicksPerWheel should ===(512)
-      // TODO remove metrics
-      MetricsEnabled should ===(true)
-      MetricsCollectorClass should ===(classOf[SigarMetricsCollector].getName)
-      MetricsInterval should ===(3 seconds)
-      MetricsGossipInterval should ===(3 seconds)
-      MetricsMovingAverageHalfLife should ===(12 seconds)
+    }
+
+    "be able to parse non-default cluster config elements" in {
+      val settings = new ClusterSettings(ConfigFactory.parseString(
+        """
+          |akka {
+          |  cluster {
+          |    roles = [ "hamlet" ]
+          |    multi-data-center.self-data-center = "blue"
+          |  }
+          |}
+        """.stripMargin).withFallback(ConfigFactory.load()), system.name)
+      import settings._
+      Roles should ===(Set("hamlet", ClusterSettings.DcRolePrefix + "blue"))
+      SelfDataCenter should ===("blue")
     }
   }
 }

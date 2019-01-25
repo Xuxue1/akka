@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.event
 
 import language.existentials
@@ -9,6 +10,8 @@ import akka.actor.ActorContext
 import akka.actor.ActorCell
 import akka.actor.DiagnosticActorLogging
 import akka.event.Logging.{ LogEvent, LogLevel }
+import akka.actor.AbstractActor
+import scala.runtime.BoxedUnit
 
 object LoggingReceive {
 
@@ -37,9 +40,16 @@ object LoggingReceive {
 
   /**
    * Java API: compatible with lambda expressions
-   * This is an EXPERIMENTAL feature and is subject to change until it has received more real world testing.
    */
+  @deprecated("Use the create method with `AbstractActor.Receive` parameter instead.", since = "2.5.0")
   def create(r: Receive, context: ActorContext): Receive = apply(r)(context)
+
+  /**
+   * Java API: compatible with lambda expressions
+   */
+  def create(r: AbstractActor.Receive, context: AbstractActor.ActorContext): AbstractActor.Receive =
+    new AbstractActor.Receive(apply(r.onMessage.asInstanceOf[PartialFunction[Any, Unit]])(context)
+      .asInstanceOf[PartialFunction[Any, BoxedUnit]])
 
   /**
    * Create a decorated logger which will append `" in state " + label` to each message it logs.

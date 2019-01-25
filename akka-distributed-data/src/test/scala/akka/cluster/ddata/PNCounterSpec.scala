@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.cluster.ddata
@@ -11,8 +11,8 @@ import org.scalatest.Matchers
 import org.scalatest.WordSpec
 
 class PNCounterSpec extends WordSpec with Matchers {
-  val node1 = UniqueAddress(Address("akka.tcp", "Sys", "localhost", 2551), 1)
-  val node2 = UniqueAddress(node1.address.copy(port = Some(2552)), 2)
+  val node1 = UniqueAddress(Address("akka.tcp", "Sys", "localhost", 2551), 1L)
+  val node2 = UniqueAddress(node1.address.copy(port = Some(2552)), 2L)
 
   "A PNCounter" must {
 
@@ -24,10 +24,18 @@ class PNCounterSpec extends WordSpec with Matchers {
 
       val c4 = c3 increment node2
       val c5 = c4 increment node2
-      val c6 = c5 increment node2
+      val c6 = c5.resetDelta increment node2
 
       c6.increments.state(node1) should be(2)
       c6.increments.state(node2) should be(3)
+
+      c2.delta.get.value.toLong should be(1)
+      c2.delta.get.increments.state(node1) should be(1)
+      c3.delta.get.value should be(2)
+      c3.delta.get.increments.state(node1) should be(2)
+
+      c6.delta.get.value should be(3)
+      c6.delta.get.increments.state(node2) should be(3)
     }
 
     "be able to decrement each node's record by one" in {
@@ -38,10 +46,16 @@ class PNCounterSpec extends WordSpec with Matchers {
 
       val c4 = c3 decrement node2
       val c5 = c4 decrement node2
-      val c6 = c5 decrement node2
+      val c6 = c5.resetDelta decrement node2
 
       c6.decrements.state(node1) should be(2)
       c6.decrements.state(node2) should be(3)
+
+      c3.delta.get.value should be(-2)
+      c3.delta.get.decrements.state(node1) should be(2)
+
+      c6.delta.get.value should be(-3)
+      c6.delta.get.decrements.state(node2) should be(3)
     }
 
     "be able to increment each node's record by arbitrary delta" in {
@@ -52,6 +66,20 @@ class PNCounterSpec extends WordSpec with Matchers {
 
       val c4 = c3 increment (node2, 2)
       val c5 = c4 increment (node2, 7)
+      val c6 = c5 increment node2
+
+      c6.increments.state(node1) should be(7)
+      c6.increments.state(node2) should be(10)
+    }
+
+    "be able to increment each node's record by arbitrary BigInt delta" in {
+      val c1 = PNCounter()
+
+      val c2 = c1 increment (node1, BigInt(3))
+      val c3 = c2 increment (node1, BigInt(4))
+
+      val c4 = c3 increment (node2, BigInt(2))
+      val c5 = c4 increment (node2, BigInt(7))
       val c6 = c5 increment node2
 
       c6.increments.state(node1) should be(7)
@@ -143,16 +171,20 @@ class PNCounterSpec extends WordSpec with Matchers {
       val c1 = PNCounter()
       val c2 = c1 increment node1
       val c3 = c2 decrement node2
+      c2.modifiedByNodes should ===(Set(node1))
       c2.needPruningFrom(node1) should be(true)
       c2.needPruningFrom(node2) should be(false)
+      c3.modifiedByNodes should ===(Set(node1, node2))
       c3.needPruningFrom(node1) should be(true)
       c3.needPruningFrom(node2) should be(true)
 
       val c4 = c3.prune(node1, node2)
+      c4.modifiedByNodes should ===(Set(node2))
       c4.needPruningFrom(node2) should be(true)
       c4.needPruningFrom(node1) should be(false)
 
       val c5 = (c4 increment node1).pruningCleanup(node1)
+      c5.modifiedByNodes should ===(Set(node2))
       c5.needPruningFrom(node1) should be(false)
     }
 

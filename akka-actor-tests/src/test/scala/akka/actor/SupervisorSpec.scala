@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.actor
@@ -51,7 +51,7 @@ object SupervisorSpec {
         throw e
     }
 
-    override def postRestart(reason: Throwable) {
+    override def postRestart(reason: Throwable): Unit = {
       sendTo ! reason.getMessage
     }
   }
@@ -164,7 +164,7 @@ class SupervisorSpec extends AkkaSpec(SupervisorSpec.config) with BeforeAndAfter
     (pingpong1, pingpong2, pingpong3, topSupervisor)
   }
 
-  override def atStartup() {
+  override def atStartup(): Unit = {
     system.eventStream.publish(Mute(EventFilter[RuntimeException](ExceptionMessage)))
   }
 
@@ -179,7 +179,13 @@ class SupervisorSpec extends AkkaSpec(SupervisorSpec.config) with BeforeAndAfter
 
   def kill(pingPongActor: ActorRef) = {
     val result = (pingPongActor.?(DieReply)(DilatedTimeout))
-    expectMsg(Timeout, ExceptionMessage)
+    expectMsg(Timeout, ExceptionMessage) //this is sent from PingPongActor's postRestart()
+    intercept[RuntimeException] { Await.result(result, DilatedTimeout) }
+  }
+
+  def killExpectNoRestart(pingPongActor: ActorRef) = {
+    val result = (pingPongActor.?(DieReply)(DilatedTimeout))
+    expectNoMsg(500 milliseconds)
     intercept[RuntimeException] { Await.result(result, DilatedTimeout) }
   }
 
@@ -200,10 +206,10 @@ class SupervisorSpec extends AkkaSpec(SupervisorSpec.config) with BeforeAndAfter
         var postRestarts = 0
         var preStarts = 0
         var postStops = 0
-        override def preRestart(reason: Throwable, message: Option[Any]) { preRestarts += 1; testActor ! ("preRestart" + preRestarts) }
-        override def postRestart(reason: Throwable) { postRestarts += 1; testActor ! ("postRestart" + postRestarts) }
-        override def preStart() { preStarts += 1; testActor ! ("preStart" + preStarts) }
-        override def postStop() { postStops += 1; testActor ! ("postStop" + postStops) }
+        override def preRestart(reason: Throwable, message: Option[Any]): Unit = { preRestarts += 1; testActor ! ("preRestart" + preRestarts) }
+        override def postRestart(reason: Throwable): Unit = { postRestarts += 1; testActor ! ("postRestart" + postRestarts) }
+        override def preStart(): Unit = { preStarts += 1; testActor ! ("preStart" + preStarts) }
+        override def postStop(): Unit = { postStops += 1; testActor ! ("postStop" + postStops) }
         def receive = {
           case "crash" ⇒ { testActor ! "crashed"; throw new RuntimeException("Expected") }
           case "ping"  ⇒ sender() ! "pong"
@@ -351,7 +357,7 @@ class SupervisorSpec extends AkkaSpec(SupervisorSpec.config) with BeforeAndAfter
       expectMsg(Timeout, PingMessage)
     }
 
-    "restart killed actors in nested superviser hierarchy" in {
+    "restart killed actors in nested supervisor hierarchy" in {
       val (actor1, actor2, actor3, _) = nestedSupervisorsAllForOne
 
       ping(actor1)
@@ -378,7 +384,7 @@ class SupervisorSpec extends AkkaSpec(SupervisorSpec.config) with BeforeAndAfter
         val init = inits.getAndIncrement()
         if (init % 3 == 1) throw new IllegalStateException("Don't wanna!")
 
-        override def preRestart(cause: Throwable, msg: Option[Any]) {
+        override def preRestart(cause: Throwable, msg: Option[Any]): Unit = {
           if (init % 3 == 0) throw new IllegalStateException("Don't wanna!")
         }
 
@@ -496,4 +502,46 @@ class SupervisorSpec extends AkkaSpec(SupervisorSpec.config) with BeforeAndAfter
 
     }
   }
+
+  "restarts a child infinitely if maxNrOfRetries = -1 and withinTimeRange = Duration.Inf" in {
+    val supervisor = system.actorOf(Props(new Supervisor(
+      OneForOneStrategy(maxNrOfRetries = -1, withinTimeRange = Duration.Inf)(classOf[Exception] :: Nil))))
+
+    val pingpong = child(supervisor, Props(new PingPongActor(testActor)))
+
+    kill(pingpong)
+    kill(pingpong)
+    kill(pingpong)
+    kill(pingpong)
+    kill(pingpong)
+    kill(pingpong)
+    kill(pingpong)
+    ping(pingpong)
+  }
+
+  "treats maxNrOfRetries = -1 as maxNrOfRetries = 1 if withinTimeRange is non-infinite Duration" in {
+    val supervisor = system.actorOf(Props(new Supervisor(
+      OneForOneStrategy(maxNrOfRetries = -1, withinTimeRange = 10 seconds)(classOf[Exception] :: Nil))))
+
+    val pingpong = child(supervisor, Props(new PingPongActor(testActor)))
+
+    ping(pingpong)
+    kill(pingpong)
+    ping(pingpong)
+    killExpectNoRestart(pingpong)
+  }
+
+  "treats withinTimeRange = Duration.Inf as a single infinite restart window" in {
+    val supervisor = system.actorOf(Props(new Supervisor(
+      OneForOneStrategy(maxNrOfRetries = 3, withinTimeRange = Duration.Inf)(classOf[Exception] :: Nil))))
+
+    val pingpong = child(supervisor, Props(new PingPongActor(testActor)))
+
+    //impossible to confirm if the restart window is infinite, so making sure maxNrOfRetries is respected correctly
+    kill(pingpong)
+    kill(pingpong)
+    kill(pingpong)
+    killExpectNoRestart(pingpong)
+  }
+
 }

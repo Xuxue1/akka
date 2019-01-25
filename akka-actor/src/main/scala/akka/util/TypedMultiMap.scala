@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2015-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2015-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.util
 
 import language.higherKinds
@@ -87,6 +88,17 @@ class TypedMultiMap[T <: AnyRef, K[_ <: T]] private (private val map: Map[T, Set
         } else this
     }
   }
+
+  def setAll(key: T)(values: Set[K[key.type]]): TypedMultiMap[T, K] =
+    new TypedMultiMap[T, K](map.updated(key, values.asInstanceOf[Set[Any]]))
+
+  /**
+   * Add all entries from the other map, overwriting existing entries.
+   *
+   * FIXME: should it merge, instead?
+   */
+  def ++(other: TypedMultiMap[T, K]): TypedMultiMap[T, K] =
+    new TypedMultiMap[T, K](map ++ other.map)
 
   override def toString: String = s"TypedMultiMap($map)"
   override def equals(other: Any) = other match {

@@ -1,17 +1,14 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
-package akka.cluster
 
-// TODO remove metrics
-// FIXME this test is not migrated to metrics extension
+package akka.cluster
 
 import language.postfixOps
 import scala.annotation.tailrec
 import scala.collection.immutable
 import scala.concurrent.duration._
 import java.util.concurrent.ThreadLocalRandom
-import java.util.concurrent.atomic.AtomicReference
 import org.scalatest.BeforeAndAfterEach
 import com.typesafe.config.Config
 import com.typesafe.config.ConfigFactory
@@ -26,12 +23,9 @@ import akka.actor.Props
 import akka.actor.RootActorPath
 import akka.actor.SupervisorStrategy._
 import akka.actor.Terminated
-import akka.cluster.ClusterEvent.ClusterMetricsChanged
 import akka.cluster.ClusterEvent.CurrentClusterState
 import akka.cluster.ClusterEvent.CurrentInternalStats
 import akka.cluster.ClusterEvent.MemberEvent
-import akka.cluster.StandardMetrics.Cpu
-import akka.cluster.StandardMetrics.HeapMemory
 import akka.remote.DefaultFailureDetectorRegistry
 import akka.remote.PhiAccrualFailureDetector
 import akka.remote.RemoteScope
@@ -86,7 +80,7 @@ private[cluster] object StressMultiJvmSpec extends MultiNodeConfig {
       nr-of-nodes-factor = 1
       # not scaled
       nr-of-seed-nodes = 3
-      nr-of-nodes-joining-to-seed-initally = 2
+      nr-of-nodes-joining-to-seed-initially = 2
       nr-of-nodes-joining-one-by-one-small = 2
       nr-of-nodes-joining-one-by-one-large = 2
       nr-of-nodes-joining-to-one = 2
@@ -116,7 +110,6 @@ private[cluster] object StressMultiJvmSpec extends MultiNodeConfig {
       # (width * math.pow(width, levels) - 1) / (width - 1)
       tree-width = 4
       tree-levels = 4
-      report-metrics-interval = 10s
       # scale convergence within timeouts with this factor
       convergence-within-factor = 1.0
       # set to off to only test cluster membership
@@ -164,7 +157,7 @@ private[cluster] object StressMultiJvmSpec extends MultiNodeConfig {
         }
       }
       /master-node-3/workers = {
-        router = adaptive-pool
+        router = round-robin-pool
         cluster {
           enabled = on
           max-nr-of-instances-per-node = 1
@@ -181,7 +174,7 @@ private[cluster] object StressMultiJvmSpec extends MultiNodeConfig {
     val infolog = getBoolean("infolog")
     val nFactor = getInt("nr-of-nodes-factor")
     val numberOfSeedNodes = getInt("nr-of-seed-nodes") // not scaled by nodes factor
-    val numberOfNodesJoiningToSeedNodesInitially = getInt("nr-of-nodes-joining-to-seed-initally") * nFactor
+    val numberOfNodesJoiningToSeedNodesInitially = getInt("nr-of-nodes-joining-to-seed-initially") * nFactor
     val numberOfNodesJoiningOneByOneSmall = getInt("nr-of-nodes-joining-one-by-one-small") * nFactor
     val numberOfNodesJoiningOneByOneLarge = getInt("nr-of-nodes-joining-one-by-one-large") * nFactor
     val numberOfNodesJoiningToOneNode = getInt("nr-of-nodes-joining-to-one") * nFactor
@@ -211,7 +204,6 @@ private[cluster] object StressMultiJvmSpec extends MultiNodeConfig {
     val expectedTestDuration = testConfig.getMillisDuration("expected-test-duration") * dFactor
     val treeWidth = getInt("tree-width")
     val treeLevels = getInt("tree-levels")
-    val reportMetricsInterval = testConfig.getMillisDuration("report-metrics-interval")
     val convergenceWithinFactor = getDouble("convergence-within-factor")
     val exerciseActors = getBoolean("exercise-actors")
 
@@ -251,12 +243,10 @@ private[cluster] object StressMultiJvmSpec extends MultiNodeConfig {
    * itself when expected results has been collected.
    */
   class ClusterResultAggregator(title: String, expectedResults: Int, settings: Settings) extends Actor with ActorLogging {
-    import settings.reportMetricsInterval
     import settings.infolog
     private val cluster = Cluster(context.system)
     private var reportTo: Option[ActorRef] = None
     private var results = Vector.empty[ClusterResult]
-    private var nodeMetrics = Set.empty[NodeMetrics]
     private var phiValuesObservedByNode = {
       import akka.cluster.Member.addressOrdering
       immutable.SortedMap.empty[Address, immutable.SortedSet[PhiValue]]
@@ -266,31 +256,18 @@ private[cluster] object StressMultiJvmSpec extends MultiNodeConfig {
       immutable.SortedMap.empty[Address, CurrentInternalStats]
     }
 
-    import context.dispatcher
-    private val reportMetricsTask = context.system.scheduler.schedule(
-      reportMetricsInterval, reportMetricsInterval, self, ReportTick)
-
-    // subscribe to ClusterMetricsChanged, re-subscribe when restart
-    override def preStart(): Unit = cluster.subscribe(self, classOf[ClusterMetricsChanged])
-    override def postStop(): Unit = {
-      cluster.unsubscribe(self)
-      reportMetricsTask.cancel()
-      super.postStop()
-    }
-
     def receive = {
-      case ClusterMetricsChanged(clusterMetrics) ⇒ nodeMetrics = clusterMetrics
-      case PhiResult(from, phiValues)            ⇒ phiValuesObservedByNode += from → phiValues
-      case StatsResult(from, stats)              ⇒ clusterStatsObservedByNode += from → stats
+      case PhiResult(from, phiValues) ⇒ phiValuesObservedByNode += from → phiValues
+      case StatsResult(from, stats)   ⇒ clusterStatsObservedByNode += from → stats
       case ReportTick ⇒
         if (infolog)
-          log.info(s"[${title}] in progress\n${formatMetrics}\n\n${formatPhi}\n\n${formatStats}")
+          log.info(s"[${title}] in progress\n\n${formatPhi}\n\n${formatStats}")
       case r: ClusterResult ⇒
         results :+= r
         if (results.size == expectedResults) {
           val aggregated = AggregatedClusterResult(title, maxDuration, totalGossipStats)
           if (infolog)
-            log.info(s"[${title}] completed in [${aggregated.duration.toMillis}] ms\n${aggregated.clusterStats}\n${formatMetrics}\n\n${formatPhi}\n\n${formatStats}")
+            log.info(s"[${title}] completed in [${aggregated.duration.toMillis}] ms\n${aggregated.clusterStats}\n\n${formatPhi}\n\n${formatStats}")
           reportTo foreach { _ ! aggregated }
           context stop self
         }
@@ -302,27 +279,6 @@ private[cluster] object StressMultiJvmSpec extends MultiNodeConfig {
 
     def totalGossipStats = results.foldLeft(GossipStats()) { _ :+ _.clusterStats }
 
-    def formatMetrics: String = {
-      import akka.cluster.Member.addressOrdering
-      (formatMetricsHeader +: (nodeMetrics.toSeq.sortBy(_.address) map formatMetricsLine)).mkString("\n")
-    }
-
-    def formatMetricsHeader: String = "[Node]\t[Heap (MB)]\t[CPU (%)]\t[Load]"
-
-    def formatMetricsLine(nodeMetrics: NodeMetrics): String = {
-      val heap = nodeMetrics match {
-        case HeapMemory(address, timestamp, used, committed, max) ⇒
-          (used.doubleValue / 1024 / 1024).form
-        case _ ⇒ ""
-      }
-      val cpuAndLoad = nodeMetrics match {
-        case Cpu(address, timestamp, loadOption, cpuOption, processors) ⇒
-          format(cpuOption) + "\t" + format(loadOption)
-        case _ ⇒ "N/A\tN/A"
-      }
-      s"${nodeMetrics.address}\t${heap}\t${cpuAndLoad}"
-    }
-
     def format(opt: Option[Double]) = opt match {
       case None    ⇒ "N/A"
       case Some(x) ⇒ x.form
@@ -331,7 +287,6 @@ private[cluster] object StressMultiJvmSpec extends MultiNodeConfig {
     def formatPhi: String = {
       if (phiValuesObservedByNode.isEmpty) ""
       else {
-        import akka.cluster.Member.addressOrdering
         val lines =
           for {
             (monitor, phiValues) ← phiValuesObservedByNode
@@ -390,7 +345,7 @@ private[cluster] object StressMultiJvmSpec extends MultiNodeConfig {
   class PhiObserver extends Actor with ActorLogging {
     val cluster = Cluster(context.system)
     var reportTo: Option[ActorRef] = None
-    val emptyPhiByNode = Map.empty[Address, PhiValue].withDefault(address ⇒ PhiValue(address, 0, 0, 0.0))
+    val emptyPhiByNode: Map[Address, PhiValue] = Map.empty[Address, PhiValue].withDefault(address ⇒ PhiValue(address, 0, 0, 0.0))
     var phiByNode = emptyPhiByNode
     var nodes = Set.empty[Address]
 
@@ -713,7 +668,6 @@ abstract class StressSpec
   }) with MultiNodeClusterSpec with BeforeAndAfterEach with ImplicitSender {
 
   import StressMultiJvmSpec._
-  import ClusterEvent._
 
   val settings = new Settings(system.settings.config)
   import settings._
@@ -1153,8 +1107,6 @@ abstract class StressSpec
 
   "A cluster under stress" must {
 
-    if (isArteryEnabled) pending
-
     "log settings" taggedAs LongRunningTest in {
       if (infolog) {
         log.info("StressSpec JVM:\n{}", jvmInfo)
@@ -1164,6 +1116,10 @@ abstract class StressSpec
       }
       enterBarrier("after-" + step)
     }
+
+    // FIXME issue #21810
+    // note: there must be one test step before pending, otherwise afterTermination will not run
+    if (isArteryEnabled) pending
 
     "join seed nodes" taggedAs LongRunningTest in within(30 seconds) {
 
@@ -1349,5 +1305,4 @@ abstract class StressSpec
       enterBarrier("after-" + step)
     }
   }
-
 }

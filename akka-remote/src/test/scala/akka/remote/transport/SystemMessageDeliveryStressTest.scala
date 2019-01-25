@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.remote.transport
 
 import akka.remote.transport.ThrottlerTransportAdapter._
@@ -82,12 +83,13 @@ object SystemMessageDeliveryStressTest {
     var counter = 0
     var burstCounter = 0
     val targetRef = target.asInstanceOf[InternalActorRef]
+    val child = context.actorOf(Props.empty, "failedChild") // need a dummy ActorRef
 
     override def preStart(): Unit = self ! "sendnext"
 
     override def receive = {
       case "sendnext" ⇒
-        targetRef.sendSystemMessage(Failed(null, null, counter))
+        targetRef.sendSystemMessage(Failed(child, null, counter))
         counter += 1
         burstCounter += 1
 
@@ -175,9 +177,9 @@ abstract class SystemMessageDeliveryStressTest(msg: String, cfg: String)
     }
   }
 
-  override def beforeTermination() {
+  override def beforeTermination(): Unit = {
     system.eventStream.publish(TestEvent.Mute(
-      EventFilter.warning(source = "akka://AkkaProtocolStressTest/user/$a", start = "received dead letter"),
+      EventFilter.warning(source = s"akka://AkkaProtocolStressTest/user/$$a", start = "received dead letter"),
       EventFilter.warning(pattern = "received dead letter.*(InboundPayload|Disassociate)")))
     systemB.eventStream.publish(TestEvent.Mute(
       EventFilter[EndpointException](),

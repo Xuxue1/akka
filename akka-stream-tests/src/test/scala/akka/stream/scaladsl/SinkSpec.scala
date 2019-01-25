@@ -1,18 +1,23 @@
-/**
- * Copyright (C) 2015-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2015-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.scaladsl
 
 import java.util
 import java.util.function
-import java.util.function.{ BinaryOperator, BiConsumer, Supplier, ToIntFunction }
+import java.util.function.{ BiConsumer, BinaryOperator, Supplier, ToIntFunction }
 import java.util.stream.Collector.Characteristics
 import java.util.stream.{ Collector, Collectors }
+
 import akka.stream._
 import akka.stream.testkit.Utils._
 import akka.stream.testkit._
+import akka.stream.testkit.scaladsl.TestSink
 import akka.testkit.DefaultTimeout
+import org.reactivestreams.Publisher
 import org.scalatest.concurrent.ScalaFutures
+
 import scala.concurrent.{ Await, Future }
 import scala.concurrent.duration._
 
@@ -128,8 +133,50 @@ class SinkSpec extends StreamSpec with DefaultTimeout with ScalaFutures {
       import Attributes._
       val s: Sink[Int, Future[Int]] = Sink.head[Int].async.addAttributes(none).named("name")
 
-      s.module.attributes.getFirst[Name] shouldEqual Some(Name("name"))
-      s.module.attributes.getFirst[AsyncBoundary.type] shouldEqual (Some(AsyncBoundary))
+      s.traversalBuilder.attributes.filtered[Name] shouldEqual List(Name("name"), Name("headSink"))
+      s.traversalBuilder.attributes.getFirst[AsyncBoundary.type] shouldEqual (Some(AsyncBoundary))
+    }
+
+    "given one attribute of a class should correctly get it as first attribute with default value" in {
+      import Attributes._
+      val s: Sink[Int, Future[Int]] = Sink.head[Int].async.addAttributes(none).named("name")
+
+      s.traversalBuilder.attributes.filtered[Name] shouldEqual List(Name("name"), Name("headSink"))
+    }
+
+    "given one attribute of a class should correctly get it as last attribute with default value" in {
+      import Attributes._
+      val s: Sink[Int, Future[Int]] = Sink.head[Int].async.addAttributes(none).named("name")
+
+      s.traversalBuilder.attributes.get[Name](Name("default")) shouldEqual Name("name")
+    }
+
+    "given no attributes of a class when getting first attribute with default value should get default value" in {
+      import Attributes._
+      val s: Sink[Int, Future[Int]] = Sink.head[Int].withAttributes(none).async
+
+      s.traversalBuilder.attributes.getFirst[Name](Name("default")) shouldEqual Name("default")
+    }
+
+    "given no attributes of a class when getting last attribute with default value should get default value" in {
+      import Attributes._
+      val s: Sink[Int, Future[Int]] = Sink.head[Int].withAttributes(none).async
+
+      s.traversalBuilder.attributes.get[Name](Name("default")) shouldEqual Name("default")
+    }
+
+    "given multiple attributes of a class when getting first attribute with default value should get first attribute" in {
+      import Attributes._
+      val s: Sink[Int, Future[Int]] = Sink.head[Int].withAttributes(none).async.named("name").named("another_name")
+
+      s.traversalBuilder.attributes.getFirst[Name](Name("default")) shouldEqual Name("name")
+    }
+
+    "given multiple attributes of a class when getting last attribute with default value should get last attribute" in {
+      import Attributes._
+      val s: Sink[Int, Future[Int]] = Sink.head[Int].async.addAttributes(none).named("name").named("another_name")
+
+      s.traversalBuilder.attributes.get[Name](Name("default")) shouldEqual Name("another_name")
     }
 
     "support contramap" in {
@@ -156,7 +203,7 @@ class SinkSpec extends StreamSpec with DefaultTimeout with ScalaFutures {
     }
 
     def supplier(): Supplier[Array[Int]] = new Supplier[Array[Int]] {
-      override def get(): Array[Int] = Array.ofDim(1)
+      override def get(): Array[Int] = new Array(1)
     }
     def accumulator(): BiConsumer[Array[Int], Int] = new BiConsumer[Array[Int], Int] {
       override def accept(a: Array[Int], b: Int): Unit = a(0) = intIdentity.applyAsInt(b)
@@ -180,28 +227,28 @@ class SinkSpec extends StreamSpec with DefaultTimeout with ScalaFutures {
       Source(1 to 100).runWith(StreamConverters
         .javaCollectorParallelUnordered(4)(
           () ⇒ Collectors.summingInt[Int](intIdentity)))
-        .futureValue should ===(5050)
+        .futureValue.toInt should ===(5050)
     }
 
     "be reusable" in {
       val sink = StreamConverters.javaCollector[Int, Integer](() ⇒ Collectors.summingInt[Int](intIdentity))
-      Source(1 to 4).runWith(sink).futureValue should ===(10)
+      Source(1 to 4).runWith(sink).futureValue.toInt should ===(10)
 
       // Collector has state so it preserves all previous elements that went though
-      Source(4 to 6).runWith(sink).futureValue should ===(15)
+      Source(4 to 6).runWith(sink).futureValue.toInt should ===(15)
     }
 
     "be reusable with parallel version" in {
       val sink = StreamConverters.javaCollectorParallelUnordered(4)(() ⇒ Collectors.summingInt[Int](intIdentity))
 
-      Source(1 to 4).runWith(sink).futureValue should ===(10)
-      Source(4 to 6).runWith(sink).futureValue should ===(15)
+      Source(1 to 4).runWith(sink).futureValue.toInt should ===(10)
+      Source(4 to 6).runWith(sink).futureValue.toInt should ===(15)
     }
 
     "fail if getting the supplier fails" in {
       def failedSupplier(): Supplier[Array[Int]] = throw TE("")
       val future = Source(1 to 100).runWith(StreamConverters.javaCollector(
-        () ⇒ new TestCollector(failedSupplier, accumulator, combiner, finisher)))
+        () ⇒ new TestCollector(failedSupplier _, accumulator _, combiner _, finisher _)))
       a[TE] shouldBe thrownBy {
         Await.result(future, 300.millis)
       }
@@ -212,7 +259,7 @@ class SinkSpec extends StreamSpec with DefaultTimeout with ScalaFutures {
         override def get(): Array[Int] = throw TE("")
       }
       val future = Source(1 to 100).runWith(StreamConverters.javaCollector(
-        () ⇒ new TestCollector(failedSupplier, accumulator, combiner, finisher)))
+        () ⇒ new TestCollector(failedSupplier _, accumulator _, combiner _, finisher _)))
       a[TE] shouldBe thrownBy {
         Await.result(future, 300.millis)
       }
@@ -222,7 +269,7 @@ class SinkSpec extends StreamSpec with DefaultTimeout with ScalaFutures {
       def failedAccumulator(): BiConsumer[Array[Int], Int] = throw TE("")
 
       val future = Source(1 to 100).runWith(StreamConverters.javaCollector(
-        () ⇒ new TestCollector(supplier, failedAccumulator, combiner, finisher)))
+        () ⇒ new TestCollector(supplier _, failedAccumulator _, combiner _, finisher _)))
       a[TE] shouldBe thrownBy {
         Await.result(future, 300.millis)
       }
@@ -234,7 +281,7 @@ class SinkSpec extends StreamSpec with DefaultTimeout with ScalaFutures {
       }
 
       val future = Source(1 to 100).runWith(StreamConverters.javaCollector(
-        () ⇒ new TestCollector(supplier, failedAccumulator, combiner, finisher)))
+        () ⇒ new TestCollector(supplier _, failedAccumulator _, combiner _, finisher _)))
       a[TE] shouldBe thrownBy {
         Await.result(future, 300.millis)
       }
@@ -244,7 +291,7 @@ class SinkSpec extends StreamSpec with DefaultTimeout with ScalaFutures {
       def failedFinisher(): function.Function[Array[Int], Int] = throw TE("")
 
       val future = Source(1 to 100).runWith(StreamConverters.javaCollector(
-        () ⇒ new TestCollector(supplier, accumulator, combiner, failedFinisher)))
+        () ⇒ new TestCollector(supplier _, accumulator _, combiner _, failedFinisher _)))
       a[TE] shouldBe thrownBy {
         Await.result(future, 300.millis)
       }
@@ -255,11 +302,86 @@ class SinkSpec extends StreamSpec with DefaultTimeout with ScalaFutures {
         override def apply(a: Array[Int]): Int = throw TE("")
       }
       val future = Source(1 to 100).runWith(StreamConverters.javaCollector(
-        () ⇒ new TestCollector(supplier, accumulator, combiner, failedFinisher)))
+        () ⇒ new TestCollector(supplier _, accumulator _, combiner _, failedFinisher _)))
       a[TE] shouldBe thrownBy {
         Await.result(future, 300.millis)
       }
     }
 
   }
+
+  "The ignore sink" should {
+
+    "fail its materialized value on abrupt materializer termination" in {
+      val mat = ActorMaterializer()
+
+      val matVal = Source.maybe[Int].runWith(Sink.ignore)(mat)
+
+      mat.shutdown()
+
+      matVal.failed.futureValue shouldBe a[AbruptStageTerminationException]
+    }
+  }
+
+  "The reduce sink" must {
+    "sum up 1 to 10 correctly" in {
+      //#reduce-operator-example
+      val source = Source(1 to 10)
+      val result = source.runWith(Sink.reduce[Int]((a, b) ⇒ a + b))
+      result.map(println)(system.dispatcher)
+      // 55
+      //#reduce-operator-example
+      assert(result.futureValue == (1 to 10 sum))
+    }
+  }
+
+  "Sink pre-materialization" must {
+    "materialize the sink and wrap its exposed publisher in a Source" in {
+      val publisherSink: Sink[String, Publisher[String]] = Sink.asPublisher[String](false)
+      val (matPub, sink) = publisherSink.preMaterialize()
+
+      val probe = Source.fromPublisher(matPub).runWith(TestSink.probe)
+      probe.expectNoMessage(100.millis)
+
+      Source.single("hello").runWith(sink)
+
+      probe.ensureSubscription()
+      probe.requestNext("hello")
+      probe.expectComplete()
+    }
+    "materialize the sink and wrap its exposed publisher(fanout) in a Source twice" in {
+      val publisherSink: Sink[String, Publisher[String]] = Sink.asPublisher[String](fanout = true)
+      val (matPub, sink) = publisherSink.preMaterialize()
+
+      val probe1 = Source.fromPublisher(matPub).runWith(TestSink.probe)
+      val probe2 = Source.fromPublisher(matPub).runWith(TestSink.probe)
+
+      Source.single("hello").runWith(sink)
+
+      probe1.ensureSubscription()
+      probe1.requestNext("hello")
+      probe1.expectComplete()
+
+      probe2.ensureSubscription()
+      probe2.requestNext("hello")
+      probe2.expectComplete()
+    }
+    "materialize the sink and wrap its exposed publisher(not fanout), should fail the second materialization" in {
+      val publisherSink: Sink[String, Publisher[String]] = Sink.asPublisher[String](fanout = false)
+      val (matPub, sink) = publisherSink.preMaterialize()
+
+      val probe1 = Source.fromPublisher(matPub).runWith(TestSink.probe)
+      val probe2 = Source.fromPublisher(matPub).runWith(TestSink.probe)
+
+      Source.single("hello").runWith(sink)
+
+      probe1.ensureSubscription()
+      probe1.requestNext("hello")
+      probe1.expectComplete()
+
+      probe2.ensureSubscription()
+      probe2.expectError().getMessage should include("only supports one subscriber")
+    }
+  }
+
 }

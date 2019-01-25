@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2014-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2014-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.stream
@@ -10,7 +10,7 @@ import akka.actor.ActorSystem
 import akka.stream.scaladsl._
 import com.typesafe.config.ConfigFactory
 import org.openjdk.jmh.annotations._
-import scala.concurrent.Lock
+import java.util.concurrent.Semaphore
 import scala.util.Success
 import akka.stream.impl.fusing.GraphStages
 import org.reactivestreams._
@@ -119,7 +119,7 @@ class FlowMapBenchmark {
   @Benchmark
   @OperationsPerInvocation(100000)
   def flow_map_100k_elements(): Unit = {
-    val lock = new Lock() // todo rethink what is the most lightweight way to await for a streams completion
+    val lock = new Semaphore(1) // todo rethink what is the most lightweight way to await for a streams completion
     lock.acquire()
 
     flow.runWith(Sink.onComplete(_ ⇒ lock.release()))(materializer)
@@ -128,7 +128,7 @@ class FlowMapBenchmark {
   }
 
   // source setup
-  private def mkMaps[O, Mat](source: Source[O, Mat], count: Int)(flow: => Graph[FlowShape[O, O], _]): Source[O, Mat] = {
+  private def mkMaps[O, Mat](source: Source[O, Mat], count: Int)(flow: ⇒ Graph[FlowShape[O, O], _]): Source[O, Mat] = {
     var f = source
     for (i ← 1 to count)
       f = f.via(flow)

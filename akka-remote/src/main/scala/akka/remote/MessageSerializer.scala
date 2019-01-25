@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.remote
@@ -7,11 +7,11 @@ package akka.remote
 import akka.remote.WireFormats._
 import akka.protobuf.ByteString
 import akka.actor.ExtendedActorSystem
-import akka.remote.artery.{ EnvelopeBuffer, HeaderBuilder }
-import akka.serialization.Serialization
-import akka.serialization.ByteBufferSerializer
-import akka.serialization.SerializationExtension
-import akka.serialization.SerializerWithStringManifest
+import akka.annotation.InternalApi
+import akka.remote.artery.{ EnvelopeBuffer, HeaderBuilder, OutboundEnvelope }
+import akka.serialization._
+import akka.util.unused
+
 import scala.util.control.NonFatal
 
 /**
@@ -19,6 +19,7 @@ import scala.util.control.NonFatal
  *
  * MessageSerializer is a helper for serializing and deserialize messages
  */
+@InternalApi
 private[akka] object MessageSerializer {
 
   class SerializationException(msg: String, cause: Throwable) extends RuntimeException(msg, cause)
@@ -43,50 +44,53 @@ private[akka] object MessageSerializer {
     val s = SerializationExtension(system)
     val serializer = s.findSerializerFor(message)
     val builder = SerializedMessage.newBuilder
+
+    val oldInfo = Serialization.currentTransportInformation.value
     try {
+      if (oldInfo eq null)
+        Serialization.currentTransportInformation.value = system.provider.serializationInformation
+
       builder.setMessage(ByteString.copyFrom(serializer.toBinary(message)))
       builder.setSerializerId(serializer.identifier)
-      serializer match {
-        case ser2: SerializerWithStringManifest ⇒
-          val manifest = ser2.manifest(message)
-          if (manifest != "")
-            builder.setMessageManifest(ByteString.copyFromUtf8(manifest))
-        case _ ⇒
-          if (serializer.includeManifest)
-            builder.setMessageManifest(ByteString.copyFromUtf8(message.getClass.getName))
-      }
+
+      val ms = Serializers.manifestFor(serializer, message)
+      if (ms.nonEmpty) builder.setMessageManifest(ByteString.copyFromUtf8(ms))
+
       builder.build
     } catch {
       case NonFatal(e) ⇒
         throw new SerializationException(s"Failed to serialize remote message [${message.getClass}] " +
           s"using serializer [${serializer.getClass}].", e)
-    }
+    } finally Serialization.currentTransportInformation.value = oldInfo
   }
 
-  def serializeForArtery(serialization: Serialization, message: AnyRef, headerBuilder: HeaderBuilder, envelope: EnvelopeBuffer): Unit = {
+  def serializeForArtery(serialization: Serialization, outboundEnvelope: OutboundEnvelope, headerBuilder: HeaderBuilder, envelope: EnvelopeBuffer): Unit = {
+    val message = outboundEnvelope.message
     val serializer = serialization.findSerializerFor(message)
+    val oldInfo = Serialization.currentTransportInformation.value
+    try {
+      if (oldInfo eq null)
+        Serialization.currentTransportInformation.value = serialization.serializationInformation
 
-    headerBuilder setSerializer serializer.identifier
+      headerBuilder.setSerializer(serializer.identifier)
+      headerBuilder.setManifest(Serializers.manifestFor(serializer, message))
+      envelope.writeHeader(headerBuilder, outboundEnvelope)
 
-    def manifest: String = serializer match {
-      case ser: SerializerWithStringManifest ⇒ ser.manifest(message)
-      case _                                 ⇒ if (serializer.includeManifest) message.getClass.getName else ""
-    }
+      serializer match {
+        case ser: ByteBufferSerializer ⇒ ser.toBinary(message, envelope.byteBuffer)
+        case _                         ⇒ envelope.byteBuffer.put(serializer.toBinary(message))
+      }
 
-    serializer match {
-      case ser: ByteBufferSerializer ⇒
-        headerBuilder setManifest manifest
-        envelope.writeHeader(headerBuilder)
-        ser.toBinary(message, envelope.byteBuffer)
-      case _ ⇒
-        headerBuilder setManifest manifest
-        envelope.writeHeader(headerBuilder)
-        envelope.byteBuffer.put(serializer.toBinary(message))
-    }
+    } finally Serialization.currentTransportInformation.value = oldInfo
   }
 
-  def deserializeForArtery(system: ExtendedActorSystem, originUid: Long, serialization: Serialization,
-                           serializer: Int, classManifest: String, envelope: EnvelopeBuffer): AnyRef = {
+  def deserializeForArtery(
+    @unused system:    ExtendedActorSystem,
+    @unused originUid: Long,
+    serialization:     Serialization,
+    serializer:        Int,
+    classManifest:     String,
+    envelope:          EnvelopeBuffer): AnyRef = {
     serialization.deserializeByteBuffer(envelope.byteBuffer, serializer, classManifest)
   }
 }

@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.persistence.serialization
@@ -11,11 +11,13 @@ import akka.persistence.fsm.PersistentFSM.{ PersistentFSMSnapshot, StateChangeEv
 import akka.persistence.serialization.{ MessageFormats ⇒ mf }
 import akka.serialization._
 import akka.protobuf._
+import scala.collection.immutable
 import scala.collection.immutable.VectorBuilder
 import scala.concurrent.duration
 import akka.actor.Actor
+import akka.util.ccompat._
 import scala.concurrent.duration.Duration
-import scala.language.existentials
+import java.io.NotSerializableException
 
 /**
  * Marker trait for all protobuf-serializable messages in `akka.persistence`.
@@ -38,12 +40,6 @@ class MessageSerializer(val system: ExtendedActorSystem) extends BaseSerializer 
   private lazy val serialization = SerializationExtension(system)
 
   override val includeManifest: Boolean = true
-
-  private lazy val transportInformation: Option[Serialization.Information] = {
-    val address = system.provider.getDefaultAddress
-    if (address.hasLocalScope) None
-    else Some(Serialization.Information(address, system))
-  }
 
   /**
    * Serializes persistent messages. Delegates serialization of a persistent
@@ -71,7 +67,7 @@ class MessageSerializer(val system: ExtendedActorSystem) extends BaseSerializer 
       case AtLeastOnceDeliverySnapshotClass ⇒ atLeastOnceDeliverySnapshot(mf.AtLeastOnceDeliverySnapshot.parseFrom(bytes))
       case PersistentStateChangeEventClass  ⇒ stateChange(mf.PersistentStateChangeEvent.parseFrom(bytes))
       case PersistentFSMSnapshotClass       ⇒ persistentFSMSnapshot(mf.PersistentFSMSnapshot.parseFrom(bytes))
-      case _                                ⇒ throw new IllegalArgumentException(s"Can't deserialize object of type ${c}")
+      case _                                ⇒ throw new NotSerializableException(s"Can't deserialize object of type ${c}")
     }
   }
 
@@ -167,26 +163,20 @@ class MessageSerializer(val system: ExtendedActorSystem) extends BaseSerializer 
       val serializer = serialization.findSerializerFor(payload)
       val builder = mf.PersistentPayload.newBuilder()
 
-      serializer match {
-        case ser2: SerializerWithStringManifest ⇒
-          val manifest = ser2.manifest(payload)
-          if (manifest != PersistentRepr.Undefined)
-            builder.setPayloadManifest(ByteString.copyFromUtf8(manifest))
-        case _ ⇒
-          if (serializer.includeManifest)
-            builder.setPayloadManifest(ByteString.copyFromUtf8(payload.getClass.getName))
-      }
+      val ms = Serializers.manifestFor(serializer, payload)
+      if (ms.nonEmpty) builder.setPayloadManifest(ByteString.copyFromUtf8(ms))
 
       builder.setPayload(ByteString.copyFrom(serializer.toBinary(payload)))
       builder.setSerializerId(serializer.identifier)
       builder
     }
 
-    // serialize actor references with full address information (defaultAddress)
-    transportInformation match {
-      case Some(ti) ⇒ Serialization.currentTransportInformation.withValue(ti) { payloadBuilder() }
-      case None     ⇒ payloadBuilder()
-    }
+    val oldInfo = Serialization.currentTransportInformation.value
+    try {
+      if (oldInfo eq null)
+        Serialization.currentTransportInformation.value = system.provider.serializationInformation
+      payloadBuilder()
+    } finally Serialization.currentTransportInformation.value = oldInfo
   }
 
   //
@@ -206,7 +196,7 @@ class MessageSerializer(val system: ExtendedActorSystem) extends BaseSerializer 
 
   private def atomicWrite(atomicWrite: mf.AtomicWrite): AtomicWrite = {
     import scala.collection.JavaConverters._
-    AtomicWrite(atomicWrite.getPayloadList.asScala.map(persistent)(collection.breakOut))
+    AtomicWrite(atomicWrite.getPayloadList.asScala.iterator.map(persistent).to(immutable.IndexedSeq))
   }
 
   private def payload(persistentPayload: mf.PersistentPayload): Any = {

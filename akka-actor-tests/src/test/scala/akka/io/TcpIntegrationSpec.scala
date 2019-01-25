@@ -1,24 +1,28 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.io
 
 import akka.actor.{ ActorRef, PoisonPill }
 import akka.io.Tcp._
-import akka.testkit.{ TestProbe, AkkaSpec }
+import akka.testkit.{ AkkaSpec, TestProbe }
 import akka.util.ByteString
 import java.io.IOException
-import java.net.{ ServerSocket, InetSocketAddress }
-import org.scalatest.concurrent.Timeouts
-import scala.concurrent.duration._
+import java.net.{ InetSocketAddress, ServerSocket }
 
+import akka.testkit.WithLogCapturing
+import org.scalatest.concurrent.Timeouts
+
+import scala.concurrent.duration._
 import scala.language.postfixOps
 
 class TcpIntegrationSpec extends AkkaSpec("""
-    akka.loglevel = INFO
+    akka.loglevel = debug
+    akka.loggers = ["akka.testkit.SilenceAllTestEventListener"]
+    akka.io.tcp.trace-logging = on
     akka.actor.serialize-creators = on
-    """) with TcpIntegrationSpecSupport with Timeouts {
+    """) with TcpIntegrationSpecSupport with Timeouts with WithLogCapturing {
 
   def verifyActorTermination(actor: ActorRef): Unit = {
     watch(actor)
@@ -152,6 +156,13 @@ class TcpIntegrationSpec extends AkkaSpec("""
 
       override def bindOptions = List(SO.SendBufferSize(1024))
       override def connectOptions = List(SO.ReceiveBufferSize(1024))
+
+      serverHandler.send(serverConnection, Close)
+      serverHandler.expectMsg(Closed)
+      clientHandler.expectMsg(PeerClosed)
+
+      verifyActorTermination(clientConnection)
+      verifyActorTermination(serverConnection)
     }
 
     "don't report Connected when endpoint isn't responding" in {

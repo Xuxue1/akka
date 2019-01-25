@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.remote
@@ -64,7 +64,7 @@ akka.actor.provider = remote
 akka.remote.untrusted-mode = on
 akka.remote.trusted-selection-paths = ["/user/receptionist", ]    
 akka.remote.netty.tcp.port = 0
-akka.loglevel = DEBUG
+akka.loglevel = DEBUG # test verifies debug
 """) with ImplicitSender {
 
   import UntrustedSpec._
@@ -73,26 +73,26 @@ akka.loglevel = DEBUG
       akka.actor.provider = remote
       akka.remote.netty.tcp.port = 0
   """))
-  val addr = system.asInstanceOf[ExtendedActorSystem].provider.getDefaultAddress
+  val address = system.asInstanceOf[ExtendedActorSystem].provider.getDefaultAddress
 
   val receptionist = system.actorOf(Props(classOf[Receptionist], testActor), "receptionist")
 
   lazy val remoteDaemon = {
     {
       val p = TestProbe()(client)
-      client.actorSelection(RootActorPath(addr) / receptionist.path.elements).tell(IdentifyReq("/remote"), p.ref)
+      client.actorSelection(RootActorPath(address) / receptionist.path.elements).tell(IdentifyReq("/remote"), p.ref)
       p.expectMsgType[ActorIdentity].ref.get
     }
   }
 
   lazy val target2 = {
     val p = TestProbe()(client)
-    client.actorSelection(RootActorPath(addr) / receptionist.path.elements).tell(
+    client.actorSelection(RootActorPath(address) / receptionist.path.elements).tell(
       IdentifyReq("child2"), p.ref)
     p.expectMsgType[ActorIdentity].ref.get
   }
 
-  override def afterTermination() {
+  override def afterTermination(): Unit = {
     shutdown(client)
   }
 
@@ -102,7 +102,7 @@ akka.loglevel = DEBUG
   "UntrustedMode" must {
 
     "allow actor selection to configured white list" in {
-      val sel = client.actorSelection(RootActorPath(addr) / receptionist.path.elements)
+      val sel = client.actorSelection(RootActorPath(address) / receptionist.path.elements)
       sel ! "hello"
       expectMsg("hello")
     }
@@ -140,42 +140,42 @@ akka.loglevel = DEBUG
       receptionist ! StopChild("child2")
       expectMsg("child2 stopped")
       // no Terminated msg, since watch was discarded
-      expectNoMsg(1.second)
+      expectNoMessage(1.second)
     }
 
     "discard actor selection" in {
-      val sel = client.actorSelection(RootActorPath(addr) / testActor.path.elements)
+      val sel = client.actorSelection(RootActorPath(address) / testActor.path.elements)
       sel ! "hello"
-      expectNoMsg(1.second)
+      expectNoMessage(1.second)
     }
 
     "discard actor selection with non root anchor" in {
       val p = TestProbe()(client)
-      client.actorSelection(RootActorPath(addr) / receptionist.path.elements).tell(
+      client.actorSelection(RootActorPath(address) / receptionist.path.elements).tell(
         Identify(None), p.ref)
       val clientReceptionistRef = p.expectMsgType[ActorIdentity].ref.get
 
       val sel = ActorSelection(clientReceptionistRef, receptionist.path.toStringWithoutAddress)
       sel ! "hello"
-      expectNoMsg(1.second)
+      expectNoMessage(1.second)
     }
 
     "discard actor selection to child of matching white list" in {
-      val sel = client.actorSelection(RootActorPath(addr) / receptionist.path.elements / "child1")
+      val sel = client.actorSelection(RootActorPath(address) / receptionist.path.elements / "child1")
       sel ! "hello"
-      expectNoMsg(1.second)
+      expectNoMessage(1.second)
     }
 
     "discard actor selection with wildcard" in {
-      val sel = client.actorSelection(RootActorPath(addr) / receptionist.path.elements / "*")
+      val sel = client.actorSelection(RootActorPath(address) / receptionist.path.elements / "*")
       sel ! "hello"
-      expectNoMsg(1.second)
+      expectNoMessage(1.second)
     }
 
     "discard actor selection containing harmful message" in {
-      val sel = client.actorSelection(RootActorPath(addr) / receptionist.path.elements)
+      val sel = client.actorSelection(RootActorPath(address) / receptionist.path.elements)
       sel ! PoisonPill
-      expectNoMsg(1.second)
+      expectNoMessage(1.second)
     }
 
   }

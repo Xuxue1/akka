@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.testkit.metrics
 
 import org.scalatest._
@@ -19,7 +20,7 @@ class MetricsKitSpec extends WordSpec with Matchers with BeforeAndAfter with Bef
     clearMetrics()
   }
 
-  override def afterAll() {
+  override def afterAll(): Unit = {
     shutdownMetrics()
   }
 

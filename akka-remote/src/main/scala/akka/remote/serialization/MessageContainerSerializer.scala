@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.remote.serialization
 
 import scala.collection.immutable
@@ -12,21 +13,12 @@ import akka.actor.SelectChildPattern
 import akka.actor.SelectParent
 import akka.actor.SelectionPathElement
 import akka.remote.ContainerFormats
-import akka.serialization.SerializationExtension
-import akka.serialization.BaseSerializer
-import akka.serialization.SerializerWithStringManifest
+import akka.serialization.{ BaseSerializer, SerializationExtension, Serializers }
+import akka.util.ccompat._
 
 class MessageContainerSerializer(val system: ExtendedActorSystem) extends BaseSerializer {
 
-  @deprecated("Use constructor with ExtendedActorSystem", "2.4")
-  def this() = this(null)
-
   private lazy val serialization = SerializationExtension(system)
-
-  // TODO remove this when deprecated this() is removed
-  override val identifier: Int =
-    if (system eq null) 6
-    else identifierFromConfig
 
   def includeManifest: Boolean = false
 
@@ -46,15 +38,8 @@ class MessageContainerSerializer(val system: ExtendedActorSystem) extends BaseSe
       setSerializerId(serializer.identifier).
       setWildcardFanOut(sel.wildcardFanOut)
 
-    serializer match {
-      case ser2: SerializerWithStringManifest ⇒
-        val manifest = ser2.manifest(message)
-        if (manifest != "")
-          builder.setMessageManifest(ByteString.copyFromUtf8(manifest))
-      case _ ⇒
-        if (serializer.includeManifest)
-          builder.setMessageManifest(ByteString.copyFromUtf8(message.getClass.getName))
-    }
+    val ms = Serializers.manifestFor(serializer, message)
+    if (ms.nonEmpty) builder.setMessageManifest(ByteString.copyFromUtf8(ms))
 
     sel.elements.foreach {
       case SelectChildName(name) ⇒
@@ -83,14 +68,14 @@ class MessageContainerSerializer(val system: ExtendedActorSystem) extends BaseSe
       manifest).get
 
     import scala.collection.JavaConverters._
-    val elements: immutable.Iterable[SelectionPathElement] = selectionEnvelope.getPatternList.asScala.map { x ⇒
+    val elements: immutable.Iterable[SelectionPathElement] = selectionEnvelope.getPatternList.asScala.iterator.map { x ⇒
       x.getType match {
         case CHILD_NAME    ⇒ SelectChildName(x.getMatcher)
         case CHILD_PATTERN ⇒ SelectChildPattern(x.getMatcher)
         case PARENT        ⇒ SelectParent
       }
 
-    }(collection.breakOut)
+    }.to(immutable.IndexedSeq)
     val wildcardFanOut = if (selectionEnvelope.hasWildcardFanOut) selectionEnvelope.getWildcardFanOut else false
     ActorSelectionMessage(msg, elements, wildcardFanOut)
   }

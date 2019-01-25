@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.testkit
@@ -32,7 +32,7 @@ class TestActorRef[T <: Actor](
     private val disregard = _supervisor match {
       case l: LocalActorRef ⇒ l.underlying.reserveChild(name)
       case r: RepointableActorRef ⇒ r.underlying match {
-        case u: UnstartedCell ⇒ throw new IllegalStateException("cannot attach a TestActor to an unstarted top-level actor, ensure that it is started by sending a message and observing the reply")
+        case _: UnstartedCell ⇒ throw new IllegalStateException("cannot attach a TestActor to an unstarted top-level actor, ensure that it is started by sending a message and observing the reply")
         case c: ActorCell     ⇒ c.reserveChild(name)
         case o                ⇒ _system.log.error("trying to attach child {} to unknown type of supervisor cell {}, this is not going to end well", name, o.getClass)
       }
@@ -54,7 +54,7 @@ class TestActorRef[T <: Actor](
   protected override def newActorCell(system: ActorSystemImpl, ref: InternalActorRef, props: Props,
                                       dispatcher: MessageDispatcher, supervisor: InternalActorRef): ActorCell =
     new ActorCell(system, ref, props, dispatcher, supervisor) {
-      override def autoReceiveMessage(msg: Envelope) {
+      override def autoReceiveMessage(msg: Envelope): Unit = {
         msg.message match {
           case InternalGetActor ⇒ sender() ! actor
           case _                ⇒ super.autoReceiveMessage(msg)
@@ -86,7 +86,7 @@ class TestActorRef[T <: Actor](
    */
   def underlyingActor: T = {
     // volatile mailbox read to bring in actor field
-    if (isTerminated) throw new IllegalActorStateException("underlying actor is terminated")
+    if (isTerminated) throw IllegalActorStateException("underlying actor is terminated")
     underlying.actor.asInstanceOf[T] match {
       case null ⇒
         val t = TestKitExtension(_system).DefaultTimeout

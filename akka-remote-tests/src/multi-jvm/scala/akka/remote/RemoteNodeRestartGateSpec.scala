@@ -1,19 +1,17 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.remote
 
 import akka.remote.transport.AssociationHandle
 
-import language.postfixOps
 import scala.concurrent.duration._
 import com.typesafe.config.ConfigFactory
 import akka.actor._
 import akka.remote.testconductor.RoleName
-import akka.remote.transport.ThrottlerTransportAdapter.{ ForceDisassociateExplicitly, ForceDisassociate, Direction }
+import akka.remote.transport.ThrottlerTransportAdapter.ForceDisassociateExplicitly
 import akka.remote.testkit.MultiNodeConfig
-import akka.remote.testkit.MultiNodeSpec
-import akka.remote.testkit.STMultiNodeSpec
 import akka.testkit._
 import akka.actor.ActorIdentity
 import akka.remote.testconductor.RoleName
@@ -89,7 +87,7 @@ abstract class RemoteNodeRestartGateSpec
       }
 
       runOn(second) {
-        val addr = system.asInstanceOf[ExtendedActorSystem].provider.getDefaultAddress
+        val address = system.asInstanceOf[ExtendedActorSystem].provider.getDefaultAddress
         val firstAddress = node(first).address
 
         enterBarrier("gated")
@@ -99,8 +97,8 @@ abstract class RemoteNodeRestartGateSpec
         val freshSystem = ActorSystem(system.name, ConfigFactory.parseString(s"""
                     akka.remote.retry-gate-closed-for = 0.5 s
                     akka.remote.netty.tcp {
-                      hostname = ${addr.host.get}
-                      port = ${addr.port.get}
+                      hostname = ${address.host.get}
+                      port = ${address.port.get}
                     }
                     """).withFallback(system.settings.config))
 

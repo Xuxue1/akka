@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2014-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2014-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.persistence.journal
 
 import akka.actor.{ ActorLogging, ActorRef, Props }
@@ -89,7 +90,7 @@ abstract class JournalPerfSpec(config: Config) extends JournalSpec(config) {
 
   /** Executes a block of code multiple times (no warm-up) */
   def measure(msg: Duration ⇒ String)(block: ⇒ Unit): Unit = {
-    val measurements = Array.ofDim[Duration](measurementIterations)
+    val measurements = new Array[Duration](measurementIterations)
     var i = 0
     while (i < measurementIterations) {
       val start = System.nanoTime()

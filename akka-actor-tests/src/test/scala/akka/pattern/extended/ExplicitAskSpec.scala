@@ -1,12 +1,12 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.pattern.extended
 
 import akka.actor._
 import akka.testkit.AkkaSpec
 import akka.util.Timeout
-import org.scalatest.concurrent.ScalaFutures
 import scala.concurrent.duration._
 
 object ExplicitAskSpec {

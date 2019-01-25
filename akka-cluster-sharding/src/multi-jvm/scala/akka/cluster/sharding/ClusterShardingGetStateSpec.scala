@@ -1,10 +1,11 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.cluster.sharding
 
 import akka.actor._
-import akka.cluster.Cluster
+import akka.cluster.{ Cluster, MultiNodeClusterSpec }
 import akka.cluster.ClusterEvent.CurrentClusterState
 import akka.remote.testconductor.RoleName
 import akka.remote.testkit.{ MultiNodeConfig, MultiNodeSpec, STMultiNodeSpec }
@@ -48,14 +49,17 @@ object ClusterShardingGetStateSpecConfig extends MultiNodeConfig {
     akka.loglevel = INFO
     akka.actor.provider = "cluster"
     akka.remote.log-remote-lifecycle-events = off
-    akka.cluster.metrics.enabled = off
     akka.cluster.auto-down-unreachable-after = 0s
     akka.cluster.sharding {
       coordinator-failure-backoff = 3s
       shard-failure-backoff = 3s
       state-store-mode = "ddata"
     }
-    """))
+    akka.cluster.sharding.distributed-data.durable.lmdb {
+      dir = target/ClusterShardingGetStateSpec/sharding-ddata
+      map-size = 10 MiB
+    }
+    """).withFallback(MultiNodeClusterSpec.clusterConfig))
 
   nodeConfig(first, second)(ConfigFactory.parseString(
     """akka.cluster.roles=["shard"]"""))

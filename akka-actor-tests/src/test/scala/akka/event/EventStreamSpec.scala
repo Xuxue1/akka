@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.event
 
 import language.postfixOps
@@ -405,7 +406,7 @@ class EventStreamSpec extends AkkaSpec(EventStreamSpec.config) {
 
   }
 
-  private def verifyLevel(bus: LoggingBus, level: Logging.LogLevel) {
+  private def verifyLevel(bus: LoggingBus, level: Logging.LogLevel): Unit = {
     import Logging._
     val allmsg = Seq(Debug("", null, "debug"), Info("", null, "info"), Warning("", null, "warning"), Error("", null, "error"))
     val msg = allmsg filter (_.level <= level)
@@ -413,7 +414,7 @@ class EventStreamSpec extends AkkaSpec(EventStreamSpec.config) {
     msg foreach (expectMsg(_))
   }
 
-  private def fishForDebugMessage(a: TestProbe, messagePrefix: String, max: Duration = 3 seconds) {
+  private def fishForDebugMessage(a: TestProbe, messagePrefix: String, max: Duration = 3 seconds): Unit = {
     a.fishForMessage(max, hint = "expected debug message prefix: " + messagePrefix) {
       case Logging.Debug(_, _, msg: String) if msg startsWith messagePrefix ⇒ true
       case other ⇒ false

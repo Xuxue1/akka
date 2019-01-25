@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.actor
@@ -92,6 +92,8 @@ package akka.actor
  *  }
  * }}}
  */
+@Deprecated
+@deprecated("Use AbstractActor instead of UntypedActor.", since = "2.5.0")
 abstract class UntypedActor extends Actor {
 
   /**

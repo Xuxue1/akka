@@ -1,21 +1,23 @@
-/**
- * Copyright (C) 2015-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2015-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.impl.io
 
 import java.io.OutputStream
 
 import akka.Done
-import akka.actor.{ Deploy, ActorLogging, Props }
+import akka.actor.{ ActorLogging, Deploy, Props }
+import akka.annotation.InternalApi
 import akka.stream.actor.{ ActorSubscriberMessage, WatermarkRequestStrategy }
-import akka.stream.IOResult
+import akka.stream.{ AbruptIOTerminationException, IOResult }
 import akka.util.ByteString
 
 import scala.concurrent.Promise
 import scala.util.{ Failure, Success }
 
 /** INTERNAL API */
-private[akka] object OutputStreamSubscriber {
+@InternalApi private[akka] object OutputStreamSubscriber {
   def props(os: OutputStream, completionPromise: Promise[IOResult], bufSize: Int, autoFlush: Boolean) = {
     require(bufSize > 0, "buffer size must be > 0")
     Props(classOf[OutputStreamSubscriber], os, completionPromise, bufSize, autoFlush).withDeploy(Deploy.local)
@@ -24,7 +26,7 @@ private[akka] object OutputStreamSubscriber {
 }
 
 /** INTERNAL API */
-private[akka] class OutputStreamSubscriber(os: OutputStream, completionPromise: Promise[IOResult], bufSize: Int, autoFlush: Boolean)
+@InternalApi private[akka] class OutputStreamSubscriber(os: OutputStream, completionPromise: Promise[IOResult], bufSize: Int, autoFlush: Boolean)
   extends akka.stream.actor.ActorSubscriber
   with ActorLogging {
 
@@ -47,7 +49,7 @@ private[akka] class OutputStreamSubscriber(os: OutputStream, completionPromise: 
 
     case ActorSubscriberMessage.OnError(ex) ⇒
       log.error(ex, "Tearing down OutputStreamSink due to upstream error, wrote bytes: {}", bytesWritten)
-      completionPromise.success(IOResult(bytesWritten, Failure(ex)))
+      completionPromise.failure(AbruptIOTerminationException(IOResult(bytesWritten, Success(Done)), ex))
       context.stop(self)
 
     case ActorSubscriberMessage.OnComplete ⇒

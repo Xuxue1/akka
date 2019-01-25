@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.remote
 
 import com.typesafe.config.Config
@@ -24,6 +25,11 @@ final class RemoteSettings(val config: Config) {
   val LogReceive: Boolean = getBoolean("akka.remote.log-received-messages")
 
   val LogSend: Boolean = getBoolean("akka.remote.log-sent-messages")
+
+  val LogFrameSizeExceeding: Option[Int] = {
+    if (config.getString("akka.remote.log-frame-size-exceeding").toLowerCase == "off") None
+    else Some(getBytes("akka.remote.log-frame-size-exceeding").toInt)
+  }
 
   val UntrustedMode: Boolean = getBoolean("akka.remote.untrusted-mode")
 

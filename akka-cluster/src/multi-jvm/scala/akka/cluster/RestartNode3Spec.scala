@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.cluster
 
 import scala.collection.immutable
@@ -12,12 +13,12 @@ import akka.actor.Deploy
 import akka.actor.Props
 import akka.actor.RootActorPath
 import akka.cluster.MemberStatus._
-import akka.remote.RARP
 import akka.remote.testkit.MultiNodeConfig
 import akka.remote.testkit.MultiNodeSpec
 import akka.remote.transport.ThrottlerTransportAdapter.Direction
 import akka.testkit._
 import com.typesafe.config.ConfigFactory
+import akka.util.ccompat.imm._
 
 object RestartNode3MultiJvmSpec extends MultiNodeConfig {
   val first = role("first")
@@ -25,7 +26,10 @@ object RestartNode3MultiJvmSpec extends MultiNodeConfig {
   val third = role("third")
 
   commonConfig(debugConfig(on = false).
-    withFallback(ConfigFactory.parseString("akka.cluster.auto-down-unreachable-after = off")).
+    withFallback(ConfigFactory.parseString("""
+      akka.cluster.auto-down-unreachable-after = off
+      akka.cluster.allow-weakly-up-members = off
+      """)).
     withFallback(MultiNodeClusterSpec.clusterConfig))
 
   testTransport(on = true)
@@ -51,11 +55,10 @@ abstract class RestartNode3Spec
   lazy val restartedSecondSystem = ActorSystem(
     system.name,
     ConfigFactory.parseString(
-      if (RARP(system).provider.remoteSettings.Artery.Enabled)
-        "akka.remote.artery.canonical.port=" + secondUniqueAddress.address.port.get
-      else
-        "akka.remote.netty.tcp.port=" + secondUniqueAddress.address.port.get
-    ).withFallback(system.settings.config))
+      s"""
+        akka.remote.artery.canonical.port = ${secondUniqueAddress.address.port.get}
+        akka.remote.netty.tcp.port = ${secondUniqueAddress.address.port.get}
+        """).withFallback(system.settings.config))
 
   override def afterAll(): Unit = {
     runOn(second) {
@@ -92,7 +95,7 @@ abstract class RestartNode3Spec
           expectMsg(5.seconds, "ok")
         }
       }
-      enterBarrier("second-address-transfered")
+      enterBarrier("second-address-transferred")
 
       // now we can join first, third together
       runOn(first, third) {
@@ -131,7 +134,7 @@ abstract class RestartNode3Spec
       runOn(second) {
         Cluster(restartedSecondSystem).joinSeedNodes(seedNodes)
         awaitAssert(Cluster(restartedSecondSystem).readView.members.size should ===(3))
-        awaitAssert(Cluster(restartedSecondSystem).readView.members.map(_.status) should ===(Set(Up)))
+        awaitAssert(Cluster(restartedSecondSystem).readView.members.unsorted.map(_.status) should ===(Set(Up)))
       }
       runOn(first, third) {
         awaitAssert {

@@ -1,9 +1,11 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka
 
 import akka.actor.ActorSystem
+import akka.util.ccompat._
 import scala.concurrent.duration.{ Duration, FiniteDuration }
 import scala.reflect.ClassTag
 import scala.collection.immutable
@@ -13,7 +15,7 @@ package object testkit {
   def filterEvents[T](eventFilters: Iterable[EventFilter])(block: ⇒ T)(implicit system: ActorSystem): T = {
     def now = System.currentTimeMillis
 
-    system.eventStream.publish(TestEvent.Mute(eventFilters.to[immutable.Seq]))
+    system.eventStream.publish(TestEvent.Mute(eventFilters.to(immutable.Seq)))
 
     try {
       val result = block
@@ -26,7 +28,7 @@ package object testkit {
 
       result
     } finally {
-      system.eventStream.publish(TestEvent.UnMute(eventFilters.to[immutable.Seq]))
+      system.eventStream.publish(TestEvent.UnMute(eventFilters.to(immutable.Seq)))
     }
   }
 
@@ -47,7 +49,7 @@ package object testkit {
    */
   implicit class TestDuration(val duration: FiniteDuration) extends AnyVal {
     def dilated(implicit system: ActorSystem): FiniteDuration =
-      (duration * TestKitExtension(system).TestTimeFactor).asInstanceOf[FiniteDuration]
+      Duration.fromNanos((duration.toNanos * TestKitExtension(system).TestTimeFactor + 0.5).toLong)
   }
 
 }

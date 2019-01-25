@@ -1,15 +1,18 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.actor
 
 import akka.AkkaException
 import akka.event.LoggingAdapter
+import java.util.Optional
 
 import scala.annotation.tailrec
 import scala.beans.BeanProperty
 import scala.util.control.NoStackTrace
+import akka.annotation.InternalApi
+import akka.util.unused
 
 /**
  * INTERNAL API
@@ -72,11 +75,26 @@ final case class Identify(messageId: Any) extends AutoReceivedMessage with NotIn
  */
 @SerialVersionUID(1L)
 final case class ActorIdentity(correlationId: Any, ref: Option[ActorRef]) {
+  if (ref.isDefined && ref.get == null) {
+    throw new IllegalArgumentException("ActorIdentity created with ref = Some(null) is not allowed, " +
+      "this could happen when serializing with Scala 2.12 and deserializing with Scala 2.11 which is not supported.")
+  }
+
   /**
    * Java API: `ActorRef` of the actor replying to the request or
    * null if no actor matched the request.
    */
+  @deprecated("Use getActorRef instead", "2.5.0")
   def getRef: ActorRef = ref.orNull
+
+  /**
+   * Java API: `ActorRef` of the actor replying to the request or
+   * not defined if no actor matched the request.
+   */
+  def getActorRef: Optional[ActorRef] = {
+    import scala.compat.java8.OptionConverters._
+    ref.asJava
+  }
 }
 
 /**
@@ -98,6 +116,7 @@ final case class Terminated private[akka] (@BeanProperty actor: ActorRef)(
   @BeanProperty val existenceConfirmed: Boolean,
   @BeanProperty val addressTerminated:  Boolean)
   extends AutoReceivedMessage with PossiblyHarmful with DeadLetterSuppression
+  with NoSerializationVerificationNeeded // local message, the remote one is DeathWatchNotification
 
 /**
  * INTERNAL API
@@ -255,6 +274,7 @@ class ActorInterruptedException private[akka] (cause: Throwable) extends AkkaExc
  */
 @SerialVersionUID(1L)
 final case class UnhandledMessage(@BeanProperty message: Any, @BeanProperty sender: ActorRef, @BeanProperty recipient: ActorRef)
+  extends NoSerializationVerificationNeeded
 
 /**
  * Classes for passing status back to the sender.
@@ -322,7 +342,7 @@ trait ActorLogging { this: Actor ⇒
 trait DiagnosticActorLogging extends Actor {
   import akka.event.Logging._
   val log = akka.event.Logging(this)
-  def mdc(currentMessage: Any): MDC = emptyMDC
+  def mdc(@unused currentMessage: Any): MDC = emptyMDC
 
   override protected[akka] def aroundReceive(receive: Actor.Receive, msg: Any): Unit = try {
     log.mdc(mdc(msg))
@@ -364,6 +384,16 @@ object Actor {
    * that will be translated to the receiving system's deadLetters.
    */
   final val noSender: ActorRef = null
+
+  /**
+   * INTERNAL API
+   */
+  private final val NotHandled = new Object
+
+  /**
+   * INTERNAL API
+   */
+  private final val notHandledFun = (_: Any) ⇒ NotHandled
 }
 
 /**
@@ -380,7 +410,7 @@ object Actor {
  * initial behavior of the actor as a partial function (behavior can be changed
  * using `context.become` and `context.unbecome`).
  *
- * This is the Scala API (hence the Scala code below), for the Java API see [[akka.actor.UntypedActor]].
+ * This is the Scala API (hence the Scala code below), for the Java API see [[akka.actor.AbstractActor]].
  *
  * {{{
  * class ExampleActor extends Actor {
@@ -424,14 +454,14 @@ trait Actor {
   type Receive = Actor.Receive
 
   /**
-   * Stores the context for this actor, including self, and sender.
+   * Scala API: Stores the context for this actor, including self, and sender.
    * It is implicit to support operations such as `forward`.
    *
    * WARNING: Only valid within the Actor itself, so do not close over it and
    * publish it to other threads!
    *
    * [[akka.actor.ActorContext]] is the Scala API. `getContext` returns a
-   * [[akka.actor.UntypedActorContext]], which is the Java API of the actor
+   * [[akka.actor.AbstractActor.ActorContext]], which is the Java API of the actor
    * context.
    */
   implicit val context: ActorContext = {
@@ -466,7 +496,7 @@ trait Actor {
   final def sender(): ActorRef = context.sender()
 
   /**
-   * This defines the initial actor behavior, it must return a partial function
+   * Scala API: This defines the initial actor behavior, it must return a partial function
    * with the actor logic.
    */
   //#receive
@@ -481,26 +511,44 @@ trait Actor {
    * @param receive current behavior.
    * @param msg current message.
    */
-  protected[akka] def aroundReceive(receive: Actor.Receive, msg: Any): Unit = receive.applyOrElse(msg, unhandled)
+  @InternalApi
+  protected[akka] def aroundReceive(receive: Actor.Receive, msg: Any): Unit = {
+    // optimization: avoid allocation of lambda
+    if (receive.applyOrElse(msg, Actor.notHandledFun).asInstanceOf[AnyRef] eq Actor.NotHandled) {
+      unhandled(msg)
+    }
+  }
 
   /**
+   * INTERNAL API.
+   *
    * Can be overridden to intercept calls to `preStart`. Calls `preStart` by default.
    */
+  @InternalApi
   protected[akka] def aroundPreStart(): Unit = preStart()
 
   /**
+   * INTERNAL API.
+   *
    * Can be overridden to intercept calls to `postStop`. Calls `postStop` by default.
    */
+  @InternalApi
   protected[akka] def aroundPostStop(): Unit = postStop()
 
   /**
+   * INTERNAL API.
+   *
    * Can be overridden to intercept calls to `preRestart`. Calls `preRestart` by default.
    */
+  @InternalApi
   protected[akka] def aroundPreRestart(reason: Throwable, message: Option[Any]): Unit = preRestart(reason, message)
 
   /**
+   * INTERNAL API.
+   *
    * Can be overridden to intercept calls to `postRestart`. Calls `postRestart` by default.
    */
+  @InternalApi
   protected[akka] def aroundPostRestart(reason: Throwable): Unit = postRestart(reason)
 
   /**
@@ -516,7 +564,7 @@ trait Actor {
    * Actors are automatically started asynchronously when created.
    * Empty default implementation.
    */
-  @throws(classOf[Exception]) // when changing this you MUST also change UntypedActorDocTest
+  @throws(classOf[Exception]) // when changing this you MUST also change ActorDocTest
   //#lifecycle-hooks
   def preStart(): Unit = ()
 
@@ -528,23 +576,23 @@ trait Actor {
    * Is called asynchronously after 'actor.stop()' is invoked.
    * Empty default implementation.
    */
-  @throws(classOf[Exception]) // when changing this you MUST also change UntypedActorDocTest
+  @throws(classOf[Exception]) // when changing this you MUST also change ActorDocTest
   //#lifecycle-hooks
   def postStop(): Unit = ()
 
   //#lifecycle-hooks
 
   /**
-   * User overridable callback: '''By default it disposes of all children and then calls `postStop()`.'''
+   * Scala API: User overridable callback: '''By default it disposes of all children and then calls `postStop()`.'''
    * @param reason the Throwable that caused the restart to happen
    * @param message optionally the current message the actor processed when failing, if applicable
    * <p/>
    * Is called on a crashed Actor right BEFORE it is restarted to allow clean
    * up of resources before Actor is terminated.
    */
-  @throws(classOf[Exception]) // when changing this you MUST also change UntypedActorDocTest
+  @throws(classOf[Exception]) // when changing this you MUST also change ActorDocTest
   //#lifecycle-hooks
-  def preRestart(reason: Throwable, message: Option[Any]): Unit = {
+  def preRestart(@unused reason: Throwable, @unused message: Option[Any]): Unit = {
     context.children foreach { child ⇒
       context.unwatch(child)
       context.stop(child)
@@ -560,9 +608,9 @@ trait Actor {
    * <p/>
    * Is called right AFTER restart on the newly created Actor to allow reinitialization after an Actor crash.
    */
-  @throws(classOf[Exception]) // when changing this you MUST also change UntypedActorDocTest
+  @throws(classOf[Exception]) // when changing this you MUST also change ActorDocTest
   //#lifecycle-hooks
-  def postRestart(reason: Throwable): Unit = {
+  def postRestart(@unused reason: Throwable): Unit = {
     preStart()
   }
   //#lifecycle-hooks
@@ -577,7 +625,7 @@ trait Actor {
    */
   def unhandled(message: Any): Unit = {
     message match {
-      case Terminated(dead) ⇒ throw new DeathPactException(dead)
+      case Terminated(dead) ⇒ throw DeathPactException(dead)
       case _                ⇒ context.system.eventStream.publish(UnhandledMessage(message, sender(), self))
     }
   }

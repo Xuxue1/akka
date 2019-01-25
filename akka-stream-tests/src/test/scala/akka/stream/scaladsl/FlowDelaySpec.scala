@@ -1,19 +1,21 @@
-/**
- * Copyright (C) 2015-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2015-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.scaladsl
 
 import akka.Done
 import akka.stream.Attributes._
-import akka.stream.testkit.Utils._
+import akka.stream.OverflowStrategies.EmitEarly
+import akka.stream.testkit.scaladsl.StreamTestKit._
 import akka.stream.testkit.scaladsl.TestSink
 import akka.stream.testkit.{ StreamSpec, TestPublisher, TestSubscriber }
-import akka.stream.{ ActorMaterializer, Attributes, BufferOverflowException, DelayOverflowStrategy }
+import akka.stream._
+import akka.testkit.TimingTest
 
-import scala.concurrent.{ Await, Future }
+import scala.concurrent.Await
 import scala.concurrent.duration._
 import scala.util.control.NoStackTrace
-import akka.stream.ThrottleMode
 
 class FlowDelaySpec extends StreamSpec {
 
@@ -21,13 +23,13 @@ class FlowDelaySpec extends StreamSpec {
 
   "A Delay" must {
 
-    "deliver elements with some time shift" in {
+    "deliver elements with some time shift" taggedAs TimingTest in {
       Await.result(
         Source(1 to 10).delay(1.seconds).grouped(100).runWith(Sink.head),
         1200.millis) should ===(1 to 10)
     }
 
-    "add delay to initialDelay if exists upstream" in {
+    "add delay to initialDelay if exists upstream" taggedAs TimingTest in {
       Source(1 to 10).initialDelay(1.second).delay(1.second).runWith(TestSink.probe[Int])
         .request(10)
         .expectNoMsg(1800.millis)
@@ -62,6 +64,26 @@ class FlowDelaySpec extends StreamSpec {
       pSub.sendNext(2)
       c.expectNoMsg(200.millis)
       c.expectNext(2)
+      pSub.sendComplete()
+      c.expectComplete()
+    }
+
+    "deliver delayed elements that arrive within the same timeout as preceding group of elements" taggedAs TimingTest in assertAllStagesStopped {
+      val c = TestSubscriber.manualProbe[Int]()
+      val p = TestPublisher.manualProbe[Int]()
+
+      Source.fromPublisher(p).delay(300.millis).to(Sink.fromSubscriber(c)).run()
+      val cSub = c.expectSubscription()
+      val pSub = p.expectSubscription()
+      cSub.request(100)
+      pSub.sendNext(1)
+      pSub.sendNext(2)
+      c.expectNoMsg(200.millis)
+      pSub.sendNext(3)
+      c.expectNext(1)
+      c.expectNext(2)
+      c.expectNoMsg(150.millis)
+      c.expectNext(3)
       pSub.sendComplete()
       c.expectComplete()
     }
@@ -106,7 +128,7 @@ class FlowDelaySpec extends StreamSpec {
         .withAttributes(inputBuffer(16, 16))
         .runWith(TestSink.probe[Int])
         .request(100)
-        .expectError(new BufferOverflowException("Buffer overflow for delay combinator (max capacity was: 16)!"))
+        .expectError(new BufferOverflowException("Buffer overflow for delay operator (max capacity was: 16)!"))
 
     }
 
@@ -127,7 +149,7 @@ class FlowDelaySpec extends StreamSpec {
       pSub.sendError(new RuntimeException() with NoStackTrace)
     }
 
-    "properly delay according to buffer size" in {
+    "properly delay according to buffer size" taggedAs TimingTest in {
       import akka.pattern.pipe
       import system.dispatcher
 
@@ -169,5 +191,14 @@ class FlowDelaySpec extends StreamSpec {
         .expectComplete()
     }
 
+    "not drop messages on overflow when EmitEarly" in {
+      val probe = Source(1 to 2)
+        .delay(1.second, EmitEarly).withAttributes(Attributes.inputBuffer(1, 1))
+        .runWith(TestSink.probe)
+
+      probe.request(10)
+        .expectNextN(1 to 2)
+        .expectComplete()
+    }
   }
 }

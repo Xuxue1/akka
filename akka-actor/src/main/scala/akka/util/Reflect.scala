@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.util
 import scala.util.control.NonFatal
 import java.lang.reflect.Constructor
@@ -32,7 +33,7 @@ private[akka] object Reflect {
       val m = c.getMethod("getCallerClass", Array(classOf[Int]): _*)
       Some((i: Int) ⇒ m.invoke(null, Array[AnyRef](i.asInstanceOf[java.lang.Integer]): _*).asInstanceOf[Class[_]])
     } catch {
-      case NonFatal(e) ⇒ None
+      case NonFatal(_) ⇒ None
     }
   }
 
@@ -42,7 +43,7 @@ private[akka] object Reflect {
    * @return a new instance from the default constructor of the given class
    */
   private[akka] def instantiate[T](clazz: Class[T]): T = try clazz.newInstance catch {
-    case iae: IllegalAccessException ⇒
+    case _: IllegalAccessException ⇒
       val ctor = clazz.getDeclaredConstructor()
       ctor.setAccessible(true)
       ctor.newInstance()

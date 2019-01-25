@@ -1,16 +1,14 @@
-/**
- * Copyright (C) 2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2016-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.remote.artery
 
 import scala.concurrent.duration._
 import akka.actor.Address
-import akka.remote.EndpointManager.Send
-import akka.remote.RemoteActorRef
 import akka.remote.UniqueAddress
 import akka.remote.artery.OutboundHandshake.HandshakeReq
 import akka.remote.artery.OutboundHandshake.HandshakeTimeoutException
-import akka.remote.artery.SystemMessageDelivery._
 import akka.stream.ActorMaterializer
 import akka.stream.ActorMaterializerSettings
 import akka.stream.scaladsl.Keep
@@ -20,7 +18,6 @@ import akka.stream.testkit.scaladsl.TestSink
 import akka.stream.testkit.scaladsl.TestSource
 import akka.testkit.AkkaSpec
 import akka.testkit.ImplicitSender
-import akka.testkit.TestProbe
 import akka.util.OptionVal
 
 class OutboundHandshakeSpec extends AkkaSpec with ImplicitSender {
@@ -36,11 +33,13 @@ class OutboundHandshakeSpec extends AkkaSpec with ImplicitSender {
   private def setupStream(
     outboundContext: OutboundContext, timeout: FiniteDuration = 5.seconds,
     retryInterval:           FiniteDuration = 10.seconds,
-    injectHandshakeInterval: FiniteDuration = 10.seconds): (TestPublisher.Probe[String], TestSubscriber.Probe[Any]) = {
+    injectHandshakeInterval: FiniteDuration = 10.seconds,
+    livenessProbeInterval:   Duration       = Duration.Undefined): (TestPublisher.Probe[String], TestSubscriber.Probe[Any]) = {
 
     TestSource.probe[String]
       .map(msg ⇒ outboundEnvelopePool.acquire().init(OptionVal.None, msg, OptionVal.None))
-      .via(new OutboundHandshake(system, outboundContext, outboundEnvelopePool, timeout, retryInterval, injectHandshakeInterval))
+      .via(new OutboundHandshake(system, outboundContext, outboundEnvelopePool, timeout, retryInterval,
+        injectHandshakeInterval, livenessProbeInterval))
       .map(env ⇒ env.message)
       .toMat(TestSink.probe[Any])(Keep.both)
       .run()
@@ -130,6 +129,21 @@ class OutboundHandshakeSpec extends AkkaSpec with ImplicitSender {
       downstream.expectNext("msg4")
       downstream.expectNoMsg(600.millis)
 
+      downstream.cancel()
+    }
+
+    "send HandshakeReq for liveness probing" in {
+      val inboundContext = new TestInboundContext(localAddress = addressA)
+      val outboundContext = inboundContext.association(addressB.address)
+      val (upstream, downstream) = setupStream(outboundContext, livenessProbeInterval = 200.millis)
+
+      downstream.request(10)
+      // this is from the initial
+      downstream.expectNext(HandshakeReq(addressA, addressB.address))
+      inboundContext.completeHandshake(addressB)
+      // these are from  livenessProbeInterval
+      downstream.expectNext(HandshakeReq(addressA, addressB.address))
+      downstream.expectNext(HandshakeReq(addressA, addressB.address))
       downstream.cancel()
     }
 

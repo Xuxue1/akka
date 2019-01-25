@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2016-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.actor
 
 import java.util.concurrent.atomic.AtomicInteger
@@ -106,7 +107,7 @@ class ExtensionSpec extends WordSpec with Matchers {
       val system = ActorSystem("extensions")
       val listedExtensions = system.settings.config.getStringList("akka.library-extensions")
       listedExtensions.size should be > 0
-      // could be initalized by other tests, so at least once
+      // could be initialized by other tests, so at least once
       InstanceCountingExtension.createCount.get() should be > 0
 
       shutdownActorSystem(system)

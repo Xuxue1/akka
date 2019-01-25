@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.actor
@@ -8,6 +8,7 @@ import scala.concurrent.duration._
 import akka.pattern.ask
 import scala.concurrent.Await
 import akka.util.Helpers.ConfigOps
+import akka.util.JavaDurationConverters._
 
 /**
  * This object contains elements which make writing actors and related code
@@ -65,7 +66,10 @@ import akka.util.Helpers.ConfigOps
  * <b>Note:</b> If you want to use an `Act with Stash`, you should use the
  * `ActWithStash` trait in order to have the actor get the necessary deque-based
  * mailbox setting.
+ *
+ * @deprecated Use the normal `actorOf` methods defined on `ActorSystem` and `ActorContext` to create Actors instead.
  */
+@deprecated("deprecated Use the normal `actorOf` methods defined on `ActorSystem` and `ActorContext` to create Actors instead.", since = "2.5.0")
 object ActorDSL extends dsl.Inbox with dsl.Creators {
 
   protected object Extension extends ExtensionId[Extension] with ExtensionIdProvider {
@@ -121,6 +125,15 @@ abstract class Inbox {
    */
   @throws(classOf[java.util.concurrent.TimeoutException])
   def receive(max: FiniteDuration): Any
+
+  /**
+   * Receive the next message from this Inbox. This call will return immediately
+   * if the internal actor previously received a message, or it will block for
+   * up to the specified duration to await reception of a message. If no message
+   * is received a [[java.util.concurrent.TimeoutException]] will be raised.
+   */
+  @throws(classOf[java.util.concurrent.TimeoutException])
+  def receive(max: java.time.Duration): Any = receive(max.asScala)
 
   /**
    * Have the internal actor watch the target actor. When the target actor

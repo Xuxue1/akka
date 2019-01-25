@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.cluster
@@ -12,11 +12,11 @@ class ReachabilitySpec extends WordSpec with Matchers {
 
   import Reachability.{ Reachable, Unreachable, Terminated, Record }
 
-  val nodeA = UniqueAddress(Address("akka.tcp", "sys", "a", 2552), 1)
-  val nodeB = UniqueAddress(Address("akka.tcp", "sys", "b", 2552), 2)
-  val nodeC = UniqueAddress(Address("akka.tcp", "sys", "c", 2552), 3)
-  val nodeD = UniqueAddress(Address("akka.tcp", "sys", "d", 2552), 4)
-  val nodeE = UniqueAddress(Address("akka.tcp", "sys", "e", 2552), 5)
+  val nodeA = UniqueAddress(Address("akka.tcp", "sys", "a", 2552), 1L)
+  val nodeB = UniqueAddress(Address("akka.tcp", "sys", "b", 2552), 2L)
+  val nodeC = UniqueAddress(Address("akka.tcp", "sys", "c", 2552), 3L)
+  val nodeD = UniqueAddress(Address("akka.tcp", "sys", "d", 2552), 4L)
+  val nodeE = UniqueAddress(Address("akka.tcp", "sys", "e", 2552), 5L)
 
   "Reachability table" must {
 
@@ -222,6 +222,29 @@ class ReachabilitySpec extends WordSpec with Matchers {
       r.status(nodeC, nodeD) should ===(Unreachable)
       r.status(nodeB, nodeC) should ===(Reachable)
       r.status(nodeB, nodeE) should ===(Reachable)
+    }
+
+    "remove correctly after pruning" in {
+      val r = Reachability.empty.
+        unreachable(nodeB, nodeA).unreachable(nodeB, nodeC).
+        unreachable(nodeD, nodeC).
+        reachable(nodeB, nodeA).reachable(nodeB, nodeC)
+      r.records should ===(Vector(Record(nodeD, nodeC, Unreachable, 1L)))
+      val r2 = r.remove(List(nodeB))
+      r2.allObservers should ===(Set(nodeD))
+      r2.versions.keySet should ===(Set(nodeD))
+    }
+
+    "be able to filter records" in {
+      val r = Reachability.empty
+        .unreachable(nodeC, nodeB)
+        .unreachable(nodeB, nodeA)
+        .unreachable(nodeB, nodeC)
+
+      val filtered1 = r.filterRecords(record ⇒ record.observer != nodeC)
+      filtered1.isReachable(nodeB) should ===(true)
+      filtered1.isReachable(nodeA) should ===(false)
+      filtered1.allObservers should ===(Set(nodeB))
     }
 
   }

@@ -1,10 +1,11 @@
-/**
- * Copyright (C) 2015-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2015-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.persistence.query.journal.leveldb.javadsl
 
 import akka.NotUsed
-import akka.persistence.query.{ EventEnvelope, EventEnvelope2, Offset }
+import akka.persistence.query.{ EventEnvelope, Offset }
 import akka.persistence.query.javadsl._
 import akka.stream.javadsl.Source
 
@@ -26,17 +27,12 @@ import akka.stream.javadsl.Source
  */
 class LeveldbReadJournal(scaladslReadJournal: akka.persistence.query.journal.leveldb.scaladsl.LeveldbReadJournal)
   extends ReadJournal
-  with AllPersistenceIdsQuery
-  with CurrentPersistenceIdsQuery
-  with EventsByPersistenceIdQuery
-  with CurrentEventsByPersistenceIdQuery
-  with EventsByTagQuery
-  with EventsByTagQuery2
-  with CurrentEventsByTagQuery
-  with CurrentEventsByTagQuery2 {
+  with PersistenceIdsQuery with CurrentPersistenceIdsQuery
+  with EventsByPersistenceIdQuery with CurrentEventsByPersistenceIdQuery
+  with EventsByTagQuery with CurrentEventsByTagQuery {
 
   /**
-   * `allPersistenceIds` is used for retrieving all `persistenceIds` of all
+   * `persistenceIds` is used for retrieving all `persistenceIds` of all
    * persistent actors.
    *
    * The returned event stream is unordered and you can expect different order for multiple
@@ -53,11 +49,11 @@ class LeveldbReadJournal(scaladslReadJournal: akka.persistence.query.journal.lev
    * The stream is completed with failure if there is a failure in executing the query in the
    * backend journal.
    */
-  override def allPersistenceIds(): Source[String, NotUsed] =
-    scaladslReadJournal.allPersistenceIds().asJava
+  override def persistenceIds(): Source[String, NotUsed] =
+    scaladslReadJournal.persistenceIds().asJava
 
   /**
-   * Same type of query as [[#allPersistenceIds]] but the stream
+   * Same type of query as [[#persistenceIds]] but the stream
    * is completed immediately when it reaches the end of the "result set". Persistent
    * actors that are created after the query is completed are not included in the stream.
    */
@@ -121,6 +117,10 @@ class LeveldbReadJournal(scaladslReadJournal: akka.persistence.query.journal.lev
    * `persistenceId` that persisted the event. The `persistenceId` + `sequenceNr` is an unique
    * identifier for the event.
    *
+   * The `offset` is exclusive, i.e. the event with the exact same sequence number will not be included
+   * in the returned stream. This means that you can use the offset that is returned in `EventEnvelope`
+   * as the `offset` parameter in a subsequent query.
+   *
    * The returned event stream is ordered by the offset (tag sequence number), which corresponds
    * to the same order as the write journal stored the events. The same stream elements (in same order)
    * are returned for multiple executions of the query. Deleted events are not deleted from the
@@ -138,10 +138,7 @@ class LeveldbReadJournal(scaladslReadJournal: akka.persistence.query.journal.lev
    * The stream is completed with failure if there is a failure in executing the query in the
    * backend journal.
    */
-  override def eventsByTag(tag: String, offset: Offset): Source[EventEnvelope2, NotUsed] =
-    scaladslReadJournal.eventsByTag(tag, offset).asJava
-
-  override def eventsByTag(tag: String, offset: Long): Source[EventEnvelope, NotUsed] =
+  override def eventsByTag(tag: String, offset: Offset): Source[EventEnvelope, NotUsed] =
     scaladslReadJournal.eventsByTag(tag, offset).asJava
 
   /**
@@ -149,11 +146,9 @@ class LeveldbReadJournal(scaladslReadJournal: akka.persistence.query.journal.lev
    * is completed immediately when it reaches the end of the "result set". Events that are
    * stored after the query is completed are not included in the event stream.
    */
-  override def currentEventsByTag(tag: String, offset: Offset): Source[EventEnvelope2, NotUsed] =
+  override def currentEventsByTag(tag: String, offset: Offset): Source[EventEnvelope, NotUsed] =
     scaladslReadJournal.currentEventsByTag(tag, offset).asJava
 
-  override def currentEventsByTag(tag: String, offset: Long): Source[EventEnvelope, NotUsed] =
-    scaladslReadJournal.currentEventsByTag(tag, offset).asJava
 }
 
 object LeveldbReadJournal {

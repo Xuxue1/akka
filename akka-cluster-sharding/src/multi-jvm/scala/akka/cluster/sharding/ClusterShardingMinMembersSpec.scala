@@ -1,14 +1,13 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.cluster.sharding
 
-import scala.concurrent.duration._
 import java.io.File
 
 import akka.actor._
-import akka.cluster.Cluster
-import akka.cluster.sharding.ShardRegion.GracefulShutdown
+import akka.cluster.{ Cluster, MemberStatus, MultiNodeClusterSpec }
 import akka.persistence.Persistence
 import akka.persistence.journal.leveldb.{ SharedLeveldbJournal, SharedLeveldbStore }
 import akka.remote.testconductor.RoleName
@@ -20,7 +19,7 @@ import org.apache.commons.io.FileUtils
 import scala.concurrent.duration._
 import akka.cluster.sharding.ShardRegion.GetClusterShardingStats
 import akka.cluster.sharding.ShardRegion.ClusterShardingStats
-import akka.cluster.MemberStatus
+import akka.util.ccompat.imm._
 
 object ClusterShardingMinMembersSpec {
   case object StopEntity
@@ -49,15 +48,19 @@ abstract class ClusterShardingMinMembersSpecConfig(val mode: String) extends Mul
       timeout = 5s
       store {
         native = off
-        dir = "target/journal-ClusterShardingMinMembersSpec"
+        dir = "target/ClusterShardingMinMembersSpec/journal"
       }
     }
     akka.persistence.snapshot-store.plugin = "akka.persistence.snapshot-store.local"
-    akka.persistence.snapshot-store.local.dir = "target/snapshots-ClusterShardingMinMembersSpec"
+    akka.persistence.snapshot-store.local.dir = "target/ClusterShardingMinMembersSpec/snapshots"
     akka.cluster.sharding.state-store-mode = "$mode"
     akka.cluster.sharding.rebalance-interval = 120s #disable rebalance
+    akka.cluster.sharding.distributed-data.durable.lmdb {
+      dir = target/ClusterShardingMinMembersSpec/sharding-ddata
+      map-size = 10 MiB
+    }
     akka.cluster.min-nr-of-members = 3
-    """))
+    """).withFallback(MultiNodeClusterSpec.clusterConfig))
 }
 
 object PersistentClusterShardingMinMembersSpecConfig extends ClusterShardingMinMembersSpecConfig("persistence")
@@ -80,21 +83,16 @@ abstract class ClusterShardingMinMembersSpec(config: ClusterShardingMinMembersSp
 
   override def initialParticipants = roles.size
 
-  val storageLocations = List(
-    "akka.persistence.journal.leveldb.dir",
-    "akka.persistence.journal.leveldb-shared.store.dir",
-    "akka.persistence.snapshot-store.local.dir").map(s ⇒ new File(system.settings.config.getString(s)))
+  val storageLocations = List(new File(system.settings.config.getString(
+    "akka.cluster.sharding.distributed-data.durable.lmdb.dir")).getParentFile)
 
-  override protected def atStartup() {
-    runOn(first) {
-      storageLocations.foreach(dir ⇒ if (dir.exists) FileUtils.deleteDirectory(dir))
-    }
+  override protected def atStartup(): Unit = {
+    storageLocations.foreach(dir ⇒ if (dir.exists) FileUtils.deleteQuietly(dir))
+    enterBarrier("startup")
   }
 
-  override protected def afterTermination() {
-    runOn(first) {
-      storageLocations.foreach(dir ⇒ if (dir.exists) FileUtils.deleteDirectory(dir))
-    }
+  override protected def afterTermination(): Unit = {
+    storageLocations.foreach(dir ⇒ if (dir.exists) FileUtils.deleteQuietly(dir))
   }
 
   def join(from: RoleName, to: RoleName): Unit = {
@@ -120,23 +118,27 @@ abstract class ClusterShardingMinMembersSpec(config: ClusterShardingMinMembersSp
 
   lazy val region = ClusterSharding(system).shardRegion("Entity")
 
+  def isDdataMode: Boolean = mode == ClusterShardingSettings.StateStoreModeDData
+
   s"Cluster with min-nr-of-members using sharding ($mode)" must {
 
-    "setup shared journal" in {
-      // start the Persistence extension
-      Persistence(system)
-      runOn(first) {
-        system.actorOf(Props[SharedLeveldbStore], "store")
-      }
-      enterBarrier("peristence-started")
+    if (!isDdataMode) {
+      "setup shared journal" in {
+        // start the Persistence extension
+        Persistence(system)
+        runOn(first) {
+          system.actorOf(Props[SharedLeveldbStore], "store")
+        }
+        enterBarrier("peristence-started")
 
-      runOn(first, second, third) {
-        system.actorSelection(node(first) / "user" / "store") ! Identify(None)
-        val sharedStore = expectMsgType[ActorIdentity](10.seconds).ref.get
-        SharedLeveldbJournal.setStore(sharedStore, system)
-      }
+        runOn(first, second, third) {
+          system.actorSelection(node(first) / "user" / "store") ! Identify(None)
+          val sharedStore = expectMsgType[ActorIdentity](10.seconds).ref.get
+          SharedLeveldbJournal.setStore(sharedStore, system)
+        }
 
-      enterBarrier("after-1")
+        enterBarrier("after-1")
+      }
     }
 
     "use all nodes" in within(30.seconds) {
@@ -153,7 +155,7 @@ abstract class ClusterShardingMinMembersSpec(config: ClusterShardingMinMembersSp
       within(remaining) {
         awaitAssert {
           cluster.state.members.size should ===(3)
-          cluster.state.members.map(_.status) should ===(Set(MemberStatus.Up))
+          cluster.state.members.unsorted.map(_.status) should ===(Set(MemberStatus.Up))
         }
       }
       enterBarrier("all-up")

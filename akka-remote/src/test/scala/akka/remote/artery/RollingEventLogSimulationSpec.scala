@@ -1,3 +1,7 @@
+/*
+ * Copyright (C) 2018-2019 Lightbend Inc. <https://www.lightbend.com>
+ */
+
 package akka.remote.artery
 
 import akka.testkit.AkkaSpec
@@ -119,7 +123,7 @@ class RollingEventLogSimulationSpec extends AkkaSpec {
 
   class Simulator(writerCount: Int, entryCount: Int, totalWrites: Int) {
     var headPointer = 0
-    val simulatedBuffer = Array.ofDim[Byte](4 * entryCount)
+    val simulatedBuffer = new Array[Byte](4 * entryCount)
     val writers = Array.tabulate(writerCount)(new Writer(_, entryCount, totalWrites))
     var activeWriters = writerCount
     var log: List[String] = Nil

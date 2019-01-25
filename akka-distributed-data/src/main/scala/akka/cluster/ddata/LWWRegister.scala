@@ -1,8 +1,10 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.cluster.ddata
 
+import akka.annotation.InternalApi
 import akka.cluster.Cluster
 import akka.cluster.UniqueAddress
 import akka.util.HashCode
@@ -43,23 +45,51 @@ object LWWRegister {
   /**
    * INTERNAL API
    */
-  private[akka] def apply[A](node: UniqueAddress, initialValue: A, clock: Clock[A]): LWWRegister[A] =
+  @InternalApi private[akka] def apply[A](node: UniqueAddress, initialValue: A, clock: Clock[A]): LWWRegister[A] =
     new LWWRegister(node, initialValue, clock(0L, initialValue))
 
+  def apply[A](node: SelfUniqueAddress, initialValue: A): LWWRegister[A] =
+    apply(node.uniqueAddress, initialValue, defaultClock[A])
+
+  def apply[A](node: SelfUniqueAddress, initialValue: A, clock: Clock[A]): LWWRegister[A] =
+    apply(node.uniqueAddress, initialValue, clock)
+
+  @deprecated("Use `apply` that takes a `SelfUniqueAddress` parameter instead.", since = "2.5.20")
   def apply[A](initialValue: A)(implicit node: Cluster, clock: Clock[A] = defaultClock[A]): LWWRegister[A] =
     apply(node.selfUniqueAddress, initialValue, clock)
 
   /**
+   * Scala API
+   * Creates a `LWWRegister` with implicits, given deprecated `apply` functions using Cluster constrain overloading.
+   */
+  def create[A](initialValue: A)(implicit node: SelfUniqueAddress, clock: Clock[A] = defaultClock[A]): LWWRegister[A] =
+    apply(node.uniqueAddress, initialValue, clock)
+
+  /**
    * Java API
    */
+  @deprecated("Use `create` that takes a `SelfUniqueAddress` parameter instead.", since = "2.5.20")
   def create[A](node: Cluster, initialValue: A): LWWRegister[A] =
     apply(initialValue)(node)
 
   /**
    * Java API
    */
+  @deprecated("Use `create` that takes a `SelfUniqueAddress` parameter instead.", since = "2.5.20")
   def create[A](node: Cluster, initialValue: A, clock: Clock[A]): LWWRegister[A] =
-    apply(initialValue)(node, clock)
+    apply(node.selfUniqueAddress, initialValue, clock)
+
+  /**
+   * Java API
+   */
+  def create[A](node: SelfUniqueAddress, initialValue: A, clock: Clock[A]): LWWRegister[A] =
+    apply(node.uniqueAddress, initialValue, clock)
+
+  /**
+   * Java API
+   */
+  def create[A](node: SelfUniqueAddress, initialValue: A): LWWRegister[A] =
+    apply(node.uniqueAddress, initialValue, defaultClock[A])
 
   /**
    * Extract the [[LWWRegister#value]].
@@ -120,13 +150,13 @@ final class LWWRegister[A] private[akka] (
    * increasing version number from a database record that is used for optimistic
    * concurrency control.
    */
-  def withValue(value: A)(implicit node: Cluster, clock: Clock[A] = defaultClock[A]): LWWRegister[A] =
-    withValue(node, value, clock)
+  def withValue(node: SelfUniqueAddress, value: A, clock: Clock[A]): LWWRegister[A] =
+    withValue(node.uniqueAddress, value, clock)
 
   /**
    * Change the value of the register.
    */
-  def withValue(node: Cluster, value: A): LWWRegister[A] =
+  def withValue(node: SelfUniqueAddress, value: A): LWWRegister[A] =
     withValue(node, value, defaultClock[A])
 
   /**
@@ -137,6 +167,18 @@ final class LWWRegister[A] private[akka] (
    * increasing version number from a database record that is used for optimistic
    * concurrency control.
    */
+  def withValueOf(value: A)(implicit node: SelfUniqueAddress, clock: Clock[A] = defaultClock[A]): LWWRegister[A] =
+    withValue(node, value, clock)
+
+  @deprecated("Use `withValueOf` that takes a `SelfUniqueAddress` parameter instead.", since = "2.5.20")
+  def withValue(value: A)(implicit node: Cluster, clock: Clock[A] = defaultClock[A]): LWWRegister[A] =
+    withValue(node, value, clock)
+
+  @deprecated("Use `withValue` that takes a `SelfUniqueAddress` parameter instead.", since = "2.5.20")
+  def withValue(node: Cluster, value: A): LWWRegister[A] =
+    withValue(node, value, defaultClock[A])
+
+  @deprecated("Use `withValue` that takes a `SelfUniqueAddress` parameter instead.", since = "2.5.20")
   def withValue(node: Cluster, value: A, clock: Clock[A]): LWWRegister[A] =
     withValue(node.selfUniqueAddress, value, clock)
 
@@ -148,7 +190,7 @@ final class LWWRegister[A] private[akka] (
   /**
    * INTERNAL API
    */
-  private[akka] def withValue(node: UniqueAddress, value: A, clock: Clock[A]): LWWRegister[A] =
+  @InternalApi private[akka] def withValue(node: UniqueAddress, value: A, clock: Clock[A]): LWWRegister[A] =
     new LWWRegister(node, value, clock(timestamp, value))
 
   override def merge(that: LWWRegister[A]): LWWRegister[A] =

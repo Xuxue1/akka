@@ -1,31 +1,27 @@
-/**
- * Copyright (C) 2015-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2015-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.io
 
-import java.nio.file.{ FileSystems, Files }
 import java.nio.charset.StandardCharsets.UTF_8
+import java.nio.file.{ Files, NoSuchFileException }
 import java.util.Random
 
 import akka.actor.ActorSystem
-import akka.stream.ActorMaterializer
-import akka.stream.ActorMaterializerSettings
-import akka.stream.ActorAttributes
-import akka.stream.Attributes
-import akka.stream.impl.ActorMaterializerImpl
-import akka.stream.impl.StreamSupervisor
+import akka.stream.IOResult._
+import akka.stream._
+import akka.stream.impl.{ PhasedFusingActorMaterializer, StreamSupervisor }
 import akka.stream.impl.StreamSupervisor.Children
 import akka.stream.io.FileSourceSpec.Settings
 import akka.stream.scaladsl.{ FileIO, Keep, Sink }
-import akka.stream.testkit._
 import akka.stream.testkit.Utils._
+import akka.stream.testkit.scaladsl.StreamTestKit._
+import akka.stream.testkit._
 import akka.stream.testkit.scaladsl.TestSink
-import akka.testkit.TestDuration
 import akka.util.ByteString
-import akka.util.Timeout
 import com.google.common.jimfs.{ Configuration, Jimfs }
 
-import scala.concurrent.Await
 import scala.concurrent.duration._
 
 object FileSourceSpec {
@@ -61,6 +57,8 @@ class FileSourceSpec extends StreamSpec(UnboundedMailboxConfig) {
     f
   }
 
+  val directoryInsteadOfFile = Files.createTempDirectory(fs.getPath("/"), "directory-instead-of-file")
+
   val LinesCount = 2000 + new Random().nextInt(300)
 
   val manyLines = {
@@ -76,16 +74,16 @@ class FileSourceSpec extends StreamSpec(UnboundedMailboxConfig) {
   "FileSource" must {
     "read contents from a file" in assertAllStagesStopped {
       val chunkSize = 512
-      val bufferAttributes = Attributes.inputBuffer(1, 2)
 
       val p = FileIO.fromPath(testFile, chunkSize)
-        .withAttributes(bufferAttributes)
+        .addAttributes(Attributes.inputBuffer(1, 2))
         .runWith(Sink.asPublisher(false))
       val c = TestSubscriber.manualProbe[ByteString]()
       p.subscribe(c)
       val sub = c.expectSubscription()
 
       var remaining = TestText
+
       def nextChunk() = {
         val (chunk, rest) = remaining.splitAt(chunkSize)
         remaining = rest
@@ -96,7 +94,7 @@ class FileSourceSpec extends StreamSpec(UnboundedMailboxConfig) {
       c.expectNext().utf8String should ===(nextChunk().toString)
       sub.request(1)
       c.expectNext().utf8String should ===(nextChunk().toString)
-      c.expectNoMsg(300.millis)
+      c.expectNoMessage(300.millis)
 
       sub.request(200)
       var expectedChunk = nextChunk().toString
@@ -109,14 +107,63 @@ class FileSourceSpec extends StreamSpec(UnboundedMailboxConfig) {
       c.expectComplete()
     }
 
+    "complete future even when abrupt termination happened" in {
+      val chunkSize = 512
+      val mat = ActorMaterializer()
+      val (future, p) = FileIO.fromPath(testFile, chunkSize)
+        .addAttributes(Attributes.inputBuffer(1, 2))
+        .toMat(TestSink.probe)(Keep.both).run()(mat)
+      p.request(1)
+      p.expectNext().utf8String should ===(TestText.splitAt(chunkSize)._1)
+      mat.shutdown()
+      future.futureValue === createSuccessful(chunkSize)
+    }
+
+    "read partial contents from a file" in assertAllStagesStopped {
+      val chunkSize = 512
+      val startPosition = 1000
+      val bufferAttributes = Attributes.inputBuffer(1, 2)
+
+      val p = FileIO.fromPath(testFile, chunkSize, startPosition)
+        .withAttributes(bufferAttributes)
+        .runWith(Sink.asPublisher(false))
+      val c = TestSubscriber.manualProbe[ByteString]()
+      p.subscribe(c)
+      val sub = c.expectSubscription()
+      var remaining = TestText.drop(1000)
+
+      def nextChunk() = {
+        val (chunk, rest) = remaining.splitAt(chunkSize)
+        remaining = rest
+        chunk
+      }
+
+      sub.request(5000)
+
+      for (_ ← 1 to 10) {
+        c.expectNext().utf8String should ===(nextChunk().toString)
+      }
+      c.expectComplete()
+    }
+
+    "be able to read not whole file" in {
+      val chunkSize = 512
+      val (future, p) = FileIO.fromPath(testFile, chunkSize)
+        .addAttributes(Attributes.inputBuffer(1, 2))
+        .toMat(TestSink.probe)(Keep.both).run()
+      p.request(1)
+      p.expectNext().utf8String should ===(TestText.splitAt(chunkSize)._1)
+      p.cancel()
+      future.futureValue === createSuccessful(chunkSize)
+    }
+
     "complete only when all contents of a file have been signalled" in assertAllStagesStopped {
       val chunkSize = 256
-      val bufferAttributes = Attributes.inputBuffer(4, 8)
 
       val demandAllButOneChunks = TestText.length / chunkSize - 1
 
       val p = FileIO.fromPath(testFile, chunkSize)
-        .withAttributes(bufferAttributes)
+        .addAttributes(Attributes.inputBuffer(4, 8))
         .runWith(Sink.asPublisher(false))
 
       val c = TestSubscriber.manualProbe[ByteString]()
@@ -132,11 +179,11 @@ class FileSourceSpec extends StreamSpec(UnboundedMailboxConfig) {
 
       sub.request(demandAllButOneChunks)
       for (i ← 1 to demandAllButOneChunks) c.expectNext().utf8String should ===(nextChunk())
-      c.expectNoMsg(300.millis)
+      c.expectNoMessage(300.millis)
 
       sub.request(1)
       c.expectNext().utf8String should ===(nextChunk())
-      c.expectNoMsg(200.millis)
+      c.expectNoMessage(200.millis)
 
       sub.request(1)
       c.expectNext().utf8String should ===(nextChunk())
@@ -149,8 +196,24 @@ class FileSourceSpec extends StreamSpec(UnboundedMailboxConfig) {
       p.subscribe(c)
 
       c.expectSubscription()
-      c.expectError()
-      val ioResult = Await.result(r, 3.seconds.dilated).status.isFailure shouldBe true
+
+      val error = c.expectError()
+      error shouldBe a[NoSuchFileException]
+
+      r.futureValue.status.isFailure shouldBe true
+    }
+
+    "onError with failure and return a failed IOResult when trying to read from a directory instead of a file" in assertAllStagesStopped {
+      val (r, p) = FileIO.fromPath(directoryInsteadOfFile).toMat(Sink.asPublisher(false))(Keep.both).run()
+      val c = TestSubscriber.manualProbe[ByteString]()
+      p.subscribe(c)
+
+      c.expectSubscription()
+
+      val error = c.expectError()
+      error shouldBe an[IllegalArgumentException]
+
+      r.futureValue.status.isFailure shouldBe true
     }
 
     List(
@@ -166,8 +229,7 @@ class FileSourceSpec extends StreamSpec(UnboundedMailboxConfig) {
 
           val f = s.runWith(Sink.fold(0) { case (acc, l) ⇒ acc + l.utf8String.count(_ == '\n') })
 
-          val lineCount = Await.result(f, 3.seconds)
-          lineCount should ===(LinesCount)
+          f.futureValue should ===(LinesCount)
         }
       }
 
@@ -177,26 +239,23 @@ class FileSourceSpec extends StreamSpec(UnboundedMailboxConfig) {
       try {
         val p = FileIO.fromPath(manyLines).runWith(TestSink.probe)(materializer)
 
-        materializer.asInstanceOf[ActorMaterializerImpl].supervisor.tell(StreamSupervisor.GetChildren, testActor)
+        materializer.asInstanceOf[PhasedFusingActorMaterializer].supervisor.tell(StreamSupervisor.GetChildren, testActor)
         val ref = expectMsgType[Children].children.find(_.path.toString contains "fileSource").get
         try assertDispatcher(ref, "akka.stream.default-blocking-io-dispatcher") finally p.cancel()
       } finally shutdown(sys)
     }
 
-    //FIXME: overriding dispatcher should be made available with dispatcher alias support in materializer (#17929)
     "allow overriding the dispatcher using Attributes" in {
-      pending
       val sys = ActorSystem("dispatcher-testing", UnboundedMailboxConfig)
       val materializer = ActorMaterializer()(sys)
-      implicit val timeout = Timeout(500.millis)
 
       try {
         val p = FileIO.fromPath(manyLines)
-          .withAttributes(ActorAttributes.dispatcher("akka.actor.default-dispatcher"))
+          .addAttributes(ActorAttributes.dispatcher("akka.actor.default-dispatcher"))
           .runWith(TestSink.probe)(materializer)
 
-        materializer.asInstanceOf[ActorMaterializerImpl].supervisor.tell(StreamSupervisor.GetChildren, testActor)
-        val ref = expectMsgType[Children].children.find(_.path.toString contains "File").get
+        materializer.asInstanceOf[PhasedFusingActorMaterializer].supervisor.tell(StreamSupervisor.GetChildren, testActor)
+        val ref = expectMsgType[Children].children.find(_.path.toString contains "fileSource").get
         try assertDispatcher(ref, "akka.actor.default-dispatcher") finally p.cancel()
       } finally shutdown(sys)
     }
@@ -206,7 +265,7 @@ class FileSourceSpec extends StreamSpec(UnboundedMailboxConfig) {
         .runWith(TestSink.probe)
         .requestNext(ByteString(TestText, UTF_8.name))
         .expectComplete()
-        .expectNoMsg(1.second)
+        .expectNoMessage(1.second)
     }
   }
 

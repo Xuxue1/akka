@@ -1,21 +1,25 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.testkit
 
 import language.postfixOps
-import scala.annotation.{ tailrec }
+import scala.annotation.tailrec
 import scala.collection.immutable
 import scala.concurrent.Await
 import scala.concurrent.duration._
 import scala.reflect.ClassTag
 import java.util.concurrent._
 import java.util.concurrent.atomic.AtomicInteger
+
 import akka.actor._
-import akka.util.{ Timeout, BoxedType }
+import akka.util.{ BoxedType, Timeout }
+
 import scala.util.control.NonFatal
 import scala.Some
 import java.util.concurrent.TimeUnit
+
 import akka.actor.IllegalActorStateException
 import akka.actor.DeadLetter
 import akka.actor.Terminated
@@ -54,11 +58,11 @@ object TestActor {
   }
   final case class RealMessage(msg: AnyRef, sender: ActorRef) extends Message
   case object NullMessage extends Message {
-    override def msg: AnyRef = throw new IllegalActorStateException("last receive did not dequeue a message")
-    override def sender: ActorRef = throw new IllegalActorStateException("last receive did not dequeue a message")
+    override def msg: AnyRef = throw IllegalActorStateException("last receive did not dequeue a message")
+    override def sender: ActorRef = throw IllegalActorStateException("last receive did not dequeue a message")
   }
 
-  val FALSE = (x: Any) ⇒ false
+  val FALSE = (_: Any) ⇒ false
 
   /** INTERNAL API */
   private[TestActor] class DelegatingSupervisorStrategy extends SupervisorStrategy {
@@ -183,12 +187,12 @@ trait TestKitBase {
    * Ignore all messages in the test actor for which the given partial
    * function returns true.
    */
-  def ignoreMsg(f: PartialFunction[Any, Boolean]) { testActor ! TestActor.SetIgnore(Some(f)) }
+  def ignoreMsg(f: PartialFunction[Any, Boolean]): Unit = { testActor ! TestActor.SetIgnore(Some(f)) }
 
   /**
    * Stop ignoring messages in the test actor.
    */
-  def ignoreNoMsg() { testActor ! TestActor.SetIgnore(None) }
+  def ignoreNoMsg(): Unit = { testActor ! TestActor.SetIgnore(None) }
 
   /**
    * Have the testActor watch someone (i.e. `context.watch(...)`).
@@ -266,12 +270,12 @@ trait TestKitBase {
    * Note that the timeout is scaled using Duration.dilated,
    * which uses the configuration entry "akka.test.timefactor".
    */
-  def awaitCond(p: ⇒ Boolean, max: Duration = Duration.Undefined, interval: Duration = 100.millis, message: String = "") {
+  def awaitCond(p: ⇒ Boolean, max: Duration = Duration.Undefined, interval: Duration = 100.millis, message: String = ""): Unit = {
     val _max = remainingOrDilated(max)
     val stop = now + _max
 
     @tailrec
-    def poll(t: Duration) {
+    def poll(t: Duration): Unit = {
       if (!p) {
         assert(now < stop, s"timeout ${_max} expired: $message")
         Thread.sleep(t.toMillis)
@@ -283,9 +287,10 @@ trait TestKitBase {
   }
 
   /**
-   * Await until the given assert does not throw an exception or the timeout
-   * expires, whichever comes first. If the timeout expires the last exception
-   * is thrown.
+   * Evaluate the given assert every `interval` until it does not throw an exception and return the
+   * result.
+   *
+   * If the `max` timeout expires the last exception is thrown.
    *
    * If no timeout is given, take it from the innermost enclosing `within`
    * block.
@@ -293,19 +298,29 @@ trait TestKitBase {
    * Note that the timeout is scaled using Duration.dilated,
    * which uses the configuration entry "akka.test.timefactor".
    */
-  def awaitAssert(a: ⇒ Any, max: Duration = Duration.Undefined, interval: Duration = 100.millis) {
+  def awaitAssert[A](a: ⇒ A, max: Duration = Duration.Undefined, interval: Duration = 100.millis): A = {
     val _max = remainingOrDilated(max)
     val stop = now + _max
 
     @tailrec
-    def poll(t: Duration) {
-      val failed =
-        try { a; false } catch {
+    def poll(t: Duration): A = {
+      // cannot use null-ness of result as signal it failed
+      // because Java API and not wanting to return a value will be "return null"
+      var failed = false
+      val result: A =
+        try {
+          val aRes = a
+          failed = false
+          aRes
+        } catch {
           case NonFatal(e) ⇒
+            failed = true
             if ((now + t) >= stop) throw e
-            true
+            else null.asInstanceOf[A]
         }
-      if (failed) {
+
+      if (!failed) result
+      else {
         Thread.sleep(t.toMillis)
         poll((stop - now) min interval)
       }
@@ -409,8 +424,11 @@ trait TestKitBase {
 
   /**
    * Receive one message from the test actor and assert that it is the Terminated message of the given ActorRef.
+   * Before calling this method, you have to `watch` the target actor ref.
    * Wait time is bounded by the given duration, with an AssertionFailure being thrown in case of timeout.
    *
+   * @param target the actor ref expected to be Terminated
+   * @param max wait no more than max time, otherwise throw AssertionFailure
    * @return the received Terminated message
    */
   def expectTerminated(target: ActorRef, max: Duration = Duration.Undefined): Terminated =
@@ -435,6 +453,25 @@ trait TestKitBase {
       assert(o ne null, s"timeout (${_max}) during fishForMessage, hint: $hint")
       assert(f.isDefinedAt(o), s"fishForMessage($hint) found unexpected message $o")
       if (f(o)) o else recv
+    }
+    recv
+  }
+
+  /**
+   * Waits for specific message that partial function matches while ignoring all other messages coming in the meantime.
+   * Use it to ignore any number of messages while waiting for a specific one.
+   *
+   * @return result of applying partial function to the last received message,
+   *         i.e. the first one for which the partial function is defined
+   */
+  def fishForSpecificMessage[T](max: Duration = Duration.Undefined, hint: String = "")(f: PartialFunction[Any, T]): T = {
+    val _max = remainingOrDilated(max)
+    val end = now + _max
+    @tailrec
+    def recv: T = {
+      val o = receiveOne(end - now)
+      assert(o ne null, s"timeout (${_max}) during fishForSpecificMessage, hint: $hint")
+      if (f.isDefinedAt(o)) f(o) else recv
     }
     recv
   }
@@ -604,17 +641,62 @@ trait TestKitBase {
   /**
    * Same as `expectNoMsg(remainingOrDefault)`, but correctly treating the timeFactor.
    */
-  def expectNoMsg() { expectNoMsg_internal(remainingOrDefault) }
+  @deprecated(message = "Use expectNoMessage instead", since = "2.5.5")
+  def expectNoMsg(): Unit = { expectNoMsg_internal(remainingOrDefault) }
 
   /**
    * Assert that no message is received for the specified time.
+   * NOTE! Supplied value is always dilated.
    */
-  def expectNoMsg(max: FiniteDuration) { expectNoMsg_internal(max.dilated) }
+  @deprecated(message = "Use expectNoMessage instead", since = "2.5.5")
+  def expectNoMsg(max: FiniteDuration): Unit = {
+    expectNoMsg_internal(max.dilated)
+  }
 
-  private def expectNoMsg_internal(max: FiniteDuration) {
-    val o = receiveOne(max)
-    assert(o eq null, s"received unexpected message $o")
-    lastWasNoMsg = true
+  /**
+   * Assert that no message is received for the specified time.
+   * Supplied value is not dilated.
+   */
+  def expectNoMessage(max: FiniteDuration) = {
+    expectNoMsg_internal(max)
+  }
+
+  /**
+   * Same as `expectNoMessage(remainingOrDefault)`, but correctly treating the timeFactor.
+   */
+  def expectNoMessage(): Unit = { expectNoMsg_internal(remainingOrDefault) }
+
+  private def expectNoMsg_internal(max: FiniteDuration): Unit = {
+    val finish = System.nanoTime() + max.toNanos
+    val pollInterval = 100.millis
+
+    def leftNow = (finish - System.nanoTime()).nanos
+
+    var elem: AnyRef = queue.peekFirst()
+    var left = leftNow
+    while (left.toNanos > 0 && elem == null) {
+      //Use of (left / 2) gives geometric series limited by finish time similar to (1/2)^n limited by 1,
+      //so it is very precise
+      Thread.sleep(
+        pollInterval.toMillis min (left / 2).toMillis
+      )
+      left = leftNow
+      if (left.toNanos > 0) {
+        elem = queue.peekFirst()
+      }
+    }
+
+    if (elem ne null) {
+      // we pop the message, such that subsequent expectNoMessage calls can
+      // assert on the next period without a message
+      queue.pop()
+
+      val diff = (max.toNanos - left.toNanos).nanos
+      val m = s"assertion failed: received unexpected message $elem after ${diff.toMillis} millis"
+      throw new java.lang.AssertionError(m)
+    } else {
+      lastWasNoMsg = true
+    }
   }
 
   /**
@@ -652,7 +734,7 @@ trait TestKitBase {
           case RealMessage(o, _) if (f isDefinedAt o) ⇒
             msg = lastMessage
             doit(f(o) :: acc, count + 1)
-          case RealMessage(o, _) ⇒
+          case RealMessage(_, _) ⇒
             queue.offerFirst(lastMessage)
             lastMessage = msg
             acc.reverse
@@ -720,8 +802,8 @@ trait TestKitBase {
    */
   def shutdown(
     actorSystem:          ActorSystem = system,
-    duration:             Duration    = 5.seconds.dilated.min(10.seconds),
-    verifySystemShutdown: Boolean     = false) {
+    duration:             Duration    = 10.seconds.dilated.min(10.seconds),
+    verifySystemShutdown: Boolean     = false): Unit = {
     TestKit.shutdownActorSystem(actorSystem, duration, verifySystemShutdown)
   }
 
@@ -861,7 +943,7 @@ object TestKit {
         val msg = "Failed to stop [%s] within [%s] \n%s".format(actorSystem.name, duration,
           actorSystem.asInstanceOf[ActorSystemImpl].printTree)
         if (verifySystemShutdown) throw new RuntimeException(msg)
-        else actorSystem.log.warning(msg)
+        else println(msg)
     }
   }
 }
@@ -931,6 +1013,7 @@ trait DefaultTimeout { this: TestKitBase ⇒
  * This class is used internal to JavaTestKit and should not be extended
  * by client code directly.
  */
+@deprecated(message = "The only usage is in JavaTestKit which is deprecated.", since = "2.5.0")
 private[testkit] abstract class CachingPartialFunction[A, B <: AnyRef] extends scala.runtime.AbstractPartialFunction[A, B] {
   import akka.japi.JavaPartialFunction._
 

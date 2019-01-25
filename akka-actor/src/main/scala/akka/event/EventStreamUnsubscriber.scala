@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.event
 
 import akka.actor._
@@ -23,7 +24,7 @@ protected[akka] class EventStreamUnsubscriber(eventStream: EventStream, debug: B
 
   import EventStreamUnsubscriber._
 
-  override def preStart() {
+  override def preStart(): Unit = {
     if (debug) eventStream.publish(Logging.Debug(simpleName(getClass), getClass, s"registering unsubscriber with $eventStream"))
     eventStream initUnsubscriber self
   }

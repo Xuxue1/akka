@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.cluster
 
 import language.postfixOps
@@ -12,7 +13,6 @@ import javax.management.ObjectName
 import akka.remote.testkit.MultiNodeConfig
 import akka.remote.testkit.MultiNodeSpec
 import akka.testkit._
-import scala.util.Try
 
 object MBeanMultiJvmSpec extends MultiNodeConfig {
   val first = role("first")
@@ -37,7 +37,6 @@ abstract class MBeanSpec
   with MultiNodeClusterSpec {
 
   import MBeanMultiJvmSpec._
-  import ClusterEvent._
 
   val mbeanName = new ObjectName("akka:type=Cluster")
   lazy val mbeanServer = ManagementFactory.getPlatformMBeanServer
@@ -116,37 +115,41 @@ abstract class MBeanSpec
         val unreachableObservedBy = Vector(first, second, third).sorted.map(address(_))
         val expectedJson =
           s"""{
-             |  "self-address": "${address(first)}",
              |  "members": [
              |    {
              |      "address": "${sortedNodes(0)}",
-             |      "status": "Up",
              |      "roles": [
+             |        "dc-default",
              |        "testNode"
-             |      ]
+             |      ],
+             |      "status": "Up"
              |    },
              |    {
              |      "address": "${sortedNodes(1)}",
-             |      "status": "Up",
              |      "roles": [
+             |        "dc-default",
              |        "testNode"
-             |      ]
+             |      ],
+             |      "status": "Up"
              |    },
              |    {
              |      "address": "${sortedNodes(2)}",
-             |      "status": "Up",
              |      "roles": [
+             |        "dc-default",
              |        "testNode"
-             |      ]
+             |      ],
+             |      "status": "Up"
              |    },
              |    {
              |      "address": "${sortedNodes(3)}",
-             |      "status": "Up",
              |      "roles": [
+             |        "dc-default",
              |        "testNode"
-             |      ]
+             |      ],
+             |      "status": "Up"
              |    }
              |  ],
+             |  "self-address": "${address(first)}",
              |  "unreachable": [
              |    {
              |      "node": "${address(fourth)}",

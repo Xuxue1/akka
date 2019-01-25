@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.persistence.journal.leveldb
 
 import akka.actor._
@@ -13,16 +14,23 @@ import scala.concurrent.Future
 import akka.persistence.JournalProtocol.RecoverySuccess
 import akka.persistence.JournalProtocol.ReplayMessagesFailure
 import akka.pattern.pipe
+import com.typesafe.config.Config
 
 /**
  * INTERNAL API.
  *
  * Journal backed by a local LevelDB store. For production use.
  */
-private[persistence] class LeveldbJournal extends { val configPath = "akka.persistence.journal.leveldb" } with AsyncWriteJournal with LeveldbStore {
+private[persistence] class LeveldbJournal(cfg: Config) extends AsyncWriteJournal with LeveldbStore {
   import LeveldbJournal._
 
-  override def receivePluginInternal: Receive = {
+  def this() = this(LeveldbStore.emptyConfig)
+
+  override def prepareConfig: Config =
+    if (cfg ne LeveldbStore.emptyConfig) cfg
+    else context.system.settings.config.getConfig("akka.persistence.journal.leveldb")
+
+  override def receivePluginInternal: Receive = receiveCompactionInternal orElse {
     case r @ ReplayTaggedMessages(fromSequenceNr, toSequenceNr, max, tag, replyTo) ⇒
       import context.dispatcher
       val readHighestSequenceNrFrom = math.max(0L, fromSequenceNr - 1)
@@ -93,6 +101,10 @@ private[persistence] object LeveldbJournal {
   final case class SubscribeTag(tag: String) extends SubscriptionCommand
   final case class TaggedEventAppended(tag: String) extends DeadLetterSuppression
 
+  /**
+   * `fromSequenceNr` is exclusive
+   * `toSequenceNr` is inclusive
+   */
   final case class ReplayTaggedMessages(fromSequenceNr: Long, toSequenceNr: Long, max: Long,
                                         tag: String, replyTo: ActorRef) extends SubscriptionCommand
   final case class ReplayedTaggedMessage(persistent: PersistentRepr, tag: String, offset: Long)

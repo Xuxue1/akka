@@ -1,16 +1,15 @@
-/**
- * Copyright (C) 2014-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2014-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.scaladsl
 
 import scala.concurrent.Await
 import scala.concurrent.Future
 import scala.concurrent.duration._
-
-import akka.stream.ActorMaterializer
-import akka.stream.ActorMaterializerSettings
+import akka.stream.{ AbruptTerminationException, ActorMaterializer, ActorMaterializerSettings }
 import akka.stream.testkit._
-import akka.stream.testkit.Utils._
+import akka.stream.testkit.scaladsl.StreamTestKit._
 
 class HeadSinkSpec extends StreamSpec with ScriptedTest {
 
@@ -80,6 +79,18 @@ class HeadSinkSpec extends StreamSpec with ScriptedTest {
 
     "yield None for empty stream" in assertAllStagesStopped {
       Await.result(Source.empty[Int].runWith(Sink.headOption), 1.second) should be(None)
+    }
+
+    "fail on abrupt termination" in {
+      val mat = ActorMaterializer()
+      val source = TestPublisher.probe()
+      val f = Source.fromPublisher(source)
+        .runWith(Sink.headOption)(mat)
+      mat.shutdown()
+
+      // this one always fails with the AbruptTerminationException rather than the
+      // AbruptStageTerminationException for some reason
+      f.failed.futureValue shouldBe an[AbruptTerminationException]
     }
 
   }

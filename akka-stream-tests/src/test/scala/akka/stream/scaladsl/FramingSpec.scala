@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2014-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2014-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.scaladsl
 
 import java.nio.ByteOrder
@@ -10,6 +11,7 @@ import akka.stream._
 import akka.stream.scaladsl.Framing.FramingException
 import akka.stream.stage.{ GraphStage, _ }
 import akka.stream.testkit.{ StreamSpec, TestPublisher, TestSubscriber }
+import akka.testkit.LongRunningTest
 import akka.util.{ ByteString, ByteStringBuilder }
 import org.scalatest.concurrent.PatienceConfiguration.Timeout
 
@@ -70,6 +72,8 @@ class FramingSpec extends StreamSpec {
 
   val rechunk = Flow[ByteString].via(new Rechunker).named("rechunker")
 
+  override def expectedTestDuration = 2.minutes
+
   "Delimiter bytes based framing" must {
 
     val delimiterBytes = List("\n", "\r\n", "FOO").map(ByteString(_))
@@ -85,7 +89,7 @@ class FramingSpec extends StreamSpec {
         yield delimiter.take(prefix) ++ s
 
     "work with various delimiters and test sequences" in {
-      for (delimiter ← delimiterBytes; _ ← 1 to 100) {
+      for (delimiter ← delimiterBytes; _ ← 1 to 5) {
         val testSequence = completeTestSequences(delimiter)
         val f = Source(testSequence)
           .map(_ ++ delimiter)
@@ -150,6 +154,16 @@ class FramingSpec extends StreamSpec {
     val fieldOffsets = List(0, 1, 2, 3, 15, 16, 31, 32, 44, 107)
 
     def encode(payload: ByteString, fieldOffset: Int, fieldLength: Int, byteOrder: ByteOrder): ByteString = {
+      encodeComplexFrame(payload, fieldOffset, fieldLength, byteOrder, ByteString(new Array[Byte](fieldOffset)), ByteString.empty)
+    }
+
+    def encodeComplexFrame(
+      payload:     ByteString,
+      fieldOffset: Int,
+      fieldLength: Int,
+      byteOrder:   ByteOrder,
+      offset:      ByteString,
+      tail:        ByteString): ByteString = {
       val header = {
         val h = (new ByteStringBuilder).putInt(payload.size)(byteOrder).result()
         byteOrder match {
@@ -157,13 +171,11 @@ class FramingSpec extends StreamSpec {
           case ByteOrder.BIG_ENDIAN    ⇒ h.drop(4 - fieldLength)
         }
       }
-
-      ByteString(Array.ofDim[Byte](fieldOffset)) ++ header ++ payload
+      offset ++ header ++ payload ++ tail
     }
 
-    "work with various byte orders, frame lengths and offsets" in {
+    "work with various byte orders, frame lengths and offsets" taggedAs LongRunningTest in {
       for {
-        _ ← (1 to 10)
         byteOrder ← byteOrders
         fieldOffset ← fieldOffsets
         fieldLength ← fieldLengths
@@ -177,6 +189,41 @@ class FramingSpec extends StreamSpec {
         Source(encodedFrames)
           .via(rechunk)
           .via(Framing.lengthField(fieldLength, fieldOffset, Int.MaxValue, byteOrder))
+          .grouped(10000)
+          .runWith(Sink.head)
+          .futureValue(Timeout(5.seconds)) should ===(encodedFrames)
+      }
+
+    }
+
+    "work with various byte orders, frame lengths and offsets using computeFrameSize" taggedAs LongRunningTest in {
+      for {
+        byteOrder ← byteOrders
+        fieldOffset ← fieldOffsets
+        fieldLength ← fieldLengths
+      } {
+
+        def computeFrameSize(offset: Array[Byte], length: Int): Int = {
+          val sizeWithoutTail = offset.length + fieldLength + length
+          if (offset.length > 0) offset(0) + sizeWithoutTail else sizeWithoutTail
+        }
+
+        def offset(): Array[Byte] = {
+          val arr = new Array[Byte](fieldOffset)
+          if (arr.length > 0) arr(0) = Random.nextInt(128).toByte
+          arr
+        }
+
+        val encodedFrames = frameLengths.filter(_ < (1L << (fieldLength * 8))).map { length ⇒
+          val payload = referenceChunk.take(length)
+          val offsetBytes = offset()
+          val tailBytes = if (offsetBytes.length > 0) new Array[Byte](offsetBytes(0)) else Array.empty[Byte]
+          encodeComplexFrame(payload, fieldOffset, fieldLength, byteOrder, ByteString(offsetBytes), ByteString(tailBytes))
+        }
+
+        Source(encodedFrames)
+          .via(rechunk)
+          .via(Framing.lengthField(fieldLength, fieldOffset, Int.MaxValue, byteOrder, computeFrameSize))
           .grouped(10000)
           .runWith(Sink.head)
           .futureValue(Timeout(5.seconds)) should ===(encodedFrames)
@@ -229,7 +276,7 @@ class FramingSpec extends StreamSpec {
         .failed.futureValue shouldBe a[FramingException]
     }
 
-    "report truncated frames" in {
+    "report truncated frames" taggedAs LongRunningTest in {
       for {
         //_ ← 1 to 10
         byteOrder ← byteOrders
@@ -263,6 +310,60 @@ class FramingSpec extends StreamSpec {
         .futureValue should ===(testMessages)
     }
 
+    "fail the stage on negative length field values (#22367)" in {
+      implicit val bo = java.nio.ByteOrder.LITTLE_ENDIAN
+
+      // A 4-byte message containing only an Int specifying the length of the payload
+      // The issue shows itself if length in message is less than or equal
+      // to -4 (if expected length field is length 4)
+      val bs = ByteString.newBuilder.putInt(-4).result()
+
+      val res =
+        Source
+          .single(bs)
+          .via(Flow[ByteString].via(Framing.lengthField(4, 0, 1000)))
+          .runWith(Sink.seq)
+
+      val ex = res.failed.futureValue
+      ex shouldBe a[FramingException]
+      ex.getMessage should ===("Decoded frame header reported negative size -4")
+    }
+
+    "fail the stage on computeFrameSize values less than minimum chunk size" in {
+      implicit val bo = java.nio.ByteOrder.LITTLE_ENDIAN
+
+      def computeFrameSize(arr: Array[Byte], l: Int): Int = 3
+
+      // A 4-byte message containing only an Int specifying the length of the payload
+      val bs = ByteString.newBuilder.putInt(4).result()
+
+      val res =
+        Source
+          .single(bs)
+          .via(Flow[ByteString].via(Framing.lengthField(4, 0, 1000, bo, computeFrameSize)))
+          .runWith(Sink.seq)
+
+      val ex = res.failed.futureValue
+      ex shouldBe a[FramingException]
+      ex.getMessage should ===("Computed frame size 3 is less than minimum chunk size 4")
+    }
+
+    "let zero length field values pass through (#22367)" in {
+      implicit val bo = java.nio.ByteOrder.LITTLE_ENDIAN
+
+      // Interleave empty frames with a frame with data
+      val encodedPayload = encode(ByteString(42), 0, 4, bo)
+      val emptyFrame = encode(ByteString(), 0, 4, bo)
+      val bs = Vector(emptyFrame, encodedPayload, emptyFrame)
+
+      val res =
+        Source(bs)
+          .via(Flow[ByteString].via(Framing.lengthField(4, 0, 1000)))
+          .runWith(Sink.seq)
+
+      res.futureValue should equal(Seq(emptyFrame, encodedPayload, emptyFrame))
+
+    }
   }
 
 }

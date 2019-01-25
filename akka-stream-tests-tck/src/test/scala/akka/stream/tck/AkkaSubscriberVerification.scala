@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2014-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2014-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.tck
 
 import akka.actor.ActorSystem
@@ -16,7 +17,7 @@ abstract class AkkaSubscriberBlackboxVerification[T](env: TestEnvironment)
   with AkkaSubscriberVerificationLike with ActorSystemLifecycle {
 
   def this(printlnDebug: Boolean) =
-    this(new TestEnvironment(Timeouts.defaultTimeoutMillis, printlnDebug))
+    this(new TestEnvironment(Timeouts.defaultTimeoutMillis, Timeouts.defaultNoSignalsTimeoutMillis, printlnDebug))
 
   def this() = this(false)
 }
@@ -26,7 +27,7 @@ abstract class AkkaSubscriberWhiteboxVerification[T](env: TestEnvironment)
   with AkkaSubscriberVerificationLike {
 
   def this(printlnDebug: Boolean) =
-    this(new TestEnvironment(Timeouts.defaultTimeoutMillis, printlnDebug))
+    this(new TestEnvironment(Timeouts.defaultTimeoutMillis, Timeouts.defaultNoSignalsTimeoutMillis, printlnDebug))
 
   def this() = this(false)
 }

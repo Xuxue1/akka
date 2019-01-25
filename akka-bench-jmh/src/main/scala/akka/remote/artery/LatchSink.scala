@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2016-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.remote.artery
 
 import java.util.concurrent.CountDownLatch
@@ -24,6 +25,11 @@ class LatchSink(countDownAfter: Int, latch: CountDownLatch) extends GraphStage[S
 
       override def preStart(): Unit = pull(in)
 
+      override def onUpstreamFailure(ex: Throwable): Unit = {
+        println(ex.getMessage)
+        ex.printStackTrace()
+      }
+
       override def onPush(): Unit = {
         n += 1
         if (n == countDownAfter)
@@ -37,7 +43,7 @@ class LatchSink(countDownAfter: Int, latch: CountDownLatch) extends GraphStage[S
 }
 
 class BarrierSink(countDownAfter: Int, latch: CountDownLatch, barrierAfter: Int, barrier: CyclicBarrier)
-    extends GraphStage[SinkShape[Any]] {
+  extends GraphStage[SinkShape[Any]] {
   val in: Inlet[Any] = Inlet("BarrierSink")
   override val shape: SinkShape[Any] = SinkShape(in)
 

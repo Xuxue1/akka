@@ -1,13 +1,15 @@
-/**
- * Copyright (C) 2015-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2015-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.scaladsl
 
 import akka.Done
 import akka.stream.testkit.StreamSpec
 import akka.stream.{ ActorMaterializer, ClosedShape, KillSwitches }
 import akka.stream.testkit.scaladsl.{ TestSink, TestSource }
-import akka.stream.testkit.Utils.{ TE, assertAllStagesStopped }
+import akka.stream.testkit.scaladsl.StreamTestKit._
+import akka.stream.testkit.Utils.TE
 
 import scala.concurrent.duration._
 

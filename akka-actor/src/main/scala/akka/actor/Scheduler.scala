@@ -1,9 +1,10 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.actor
 
+import akka.util.JavaDurationConverters
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
 import scala.util.control.NoStackTrace
@@ -30,6 +31,11 @@ private final case class SchedulerException(msg: String) extends akka.AkkaExcept
  *  1) the system’s com.typesafe.config.Config (from system.settings.config)
  *  2) a akka.event.LoggingAdapter
  *  3) a java.util.concurrent.ThreadFactory
+ *
+ * Please note that this scheduler implementation is higly optimised for high-throughput
+ * and high-frequency events. It is not to be confused with long-term schedulers such as
+ * Quartz. The scheduler will throw an exception if attempts are made to schedule too far
+ * into the future (which by default is around 8 months (`Int.MaxValue` seconds).
  */
 trait Scheduler {
   /**
@@ -48,13 +54,31 @@ trait Scheduler {
     executor: ExecutionContext,
                        sender: ActorRef = Actor.noSender): Cancellable =
     schedule(initialDelay, interval, new Runnable {
-      def run = {
+      def run(): Unit = {
         receiver ! message
         if (receiver.isTerminated)
-          throw new SchedulerException("timer active for terminated actor")
+          throw SchedulerException("timer active for terminated actor")
       }
     })
 
+  /**
+   * Schedules a message to be sent repeatedly with an initial delay and
+   * frequency. E.g. if you would like a message to be sent immediately and
+   * thereafter every 500ms you would set delay=Duration.Zero and
+   * interval=Duration(500, TimeUnit.MILLISECONDS)
+   *
+   * Java API
+   */
+  final def schedule(
+    initialDelay: java.time.Duration,
+    interval:     java.time.Duration,
+    receiver:     ActorRef,
+    message:      Any,
+    executor:     ExecutionContext,
+    sender:       ActorRef): Cancellable = {
+    import JavaDurationConverters._
+    schedule(initialDelay.asScala, interval.asScala, receiver, message)(executor, sender)
+  }
   /**
    * Schedules a function to be run repeatedly with an initial delay and a
    * frequency. E.g. if you would like the function to be run after 2 seconds
@@ -75,7 +99,7 @@ trait Scheduler {
     interval:     FiniteDuration)(f: ⇒ Unit)(
     implicit
     executor: ExecutionContext): Cancellable =
-    schedule(initialDelay, interval, new Runnable { override def run = f })
+    schedule(initialDelay, interval, new Runnable { override def run(): Unit = f })
 
   /**
    * Schedules a `Runnable` to be run repeatedly with an initial delay and
@@ -91,6 +115,9 @@ trait Scheduler {
    * If the `Runnable` throws an exception the repeated scheduling is aborted,
    * i.e. the function will not be invoked any more.
    *
+   * @throws IllegalArgumentException if the given delays exceed the maximum
+   * reach (calculated as: `delay / tickNanos > Int.MaxValue`).
+   *
    * Java API
    */
   def schedule(
@@ -99,8 +126,38 @@ trait Scheduler {
     runnable:     Runnable)(implicit executor: ExecutionContext): Cancellable
 
   /**
+   * Schedules a `Runnable` to be run repeatedly with an initial delay and
+   * a frequency. E.g. if you would like the function to be run after 2
+   * seconds and thereafter every 100ms you would set delay = Duration(2,
+   * TimeUnit.SECONDS) and interval = Duration(100, TimeUnit.MILLISECONDS). If
+   * the execution of the runnable takes longer than the interval, the
+   * subsequent execution will start immediately after the prior one completes
+   * (there will be no overlap of executions of the runnable). In such cases,
+   * the actual execution interval will differ from the interval passed to this
+   * method.
+   *
+   * If the `Runnable` throws an exception the repeated scheduling is aborted,
+   * i.e. the function will not be invoked any more.
+   *
+   * @throws IllegalArgumentException if the given delays exceed the maximum
+   * reach (calculated as: `delay / tickNanos > Int.MaxValue`).
+   *
+   * Java API
+   */
+  def schedule(
+    initialDelay: java.time.Duration,
+    interval:     java.time.Duration,
+    runnable:     Runnable)(implicit executor: ExecutionContext): Cancellable = {
+    import JavaDurationConverters._
+    schedule(initialDelay.asScala, interval.asScala, runnable)
+  }
+
+  /**
    * Schedules a message to be sent once with a delay, i.e. a time period that has
    * to pass before the message is sent.
+   *
+   * @throws IllegalArgumentException if the given delays exceed the maximum
+   * reach (calculated as: `delay / tickNanos > Int.MaxValue`).
    *
    * Java & Scala API
    */
@@ -111,29 +168,70 @@ trait Scheduler {
     executor: ExecutionContext,
                    sender: ActorRef = Actor.noSender): Cancellable =
     scheduleOnce(delay, new Runnable {
-      override def run = receiver ! message
+      override def run(): Unit = receiver ! message
     })
+
+  /**
+   * Schedules a message to be sent once with a delay, i.e. a time period that has
+   * to pass before the message is sent.
+   *
+   * @throws IllegalArgumentException if the given delays exceed the maximum
+   * reach (calculated as: `delay / tickNanos > Int.MaxValue`).
+   *
+   * Java API
+   */
+  final def scheduleOnce(
+    delay:    java.time.Duration,
+    receiver: ActorRef,
+    message:  Any,
+    executor: ExecutionContext,
+    sender:   ActorRef): Cancellable = {
+    import JavaDurationConverters._
+    scheduleOnce(delay.asScala, receiver, message)(executor, sender)
+  }
 
   /**
    * Schedules a function to be run once with a delay, i.e. a time period that has
    * to pass before the function is run.
+   *
+   * @throws IllegalArgumentException if the given delays exceed the maximum
+   * reach (calculated as: `delay / tickNanos > Int.MaxValue`).
    *
    * Scala API
    */
   final def scheduleOnce(delay: FiniteDuration)(f: ⇒ Unit)(
     implicit
     executor: ExecutionContext): Cancellable =
-    scheduleOnce(delay, new Runnable { override def run = f })
+    scheduleOnce(delay, new Runnable { override def run(): Unit = f })
 
   /**
    * Schedules a Runnable to be run once with a delay, i.e. a time period that
    * has to pass before the runnable is executed.
+   *
+   * @throws IllegalArgumentException if the given delays exceed the maximum
+   * reach (calculated as: `delay / tickNanos > Int.MaxValue`).
    *
    * Java & Scala API
    */
   def scheduleOnce(
     delay:    FiniteDuration,
     runnable: Runnable)(implicit executor: ExecutionContext): Cancellable
+
+  /**
+   * Schedules a Runnable to be run once with a delay, i.e. a time period that
+   * has to pass before the runnable is executed.
+   *
+   * @throws IllegalArgumentException if the given delays exceed the maximum
+   * reach (calculated as: `delay / tickNanos > Int.MaxValue`).
+   *
+   * Java & Scala API
+   */
+  def scheduleOnce(
+    delay:    java.time.Duration,
+    runnable: Runnable)(implicit executor: ExecutionContext): Cancellable = {
+    import JavaDurationConverters._
+    scheduleOnce(delay.asScala, runnable)(executor)
+  }
 
   /**
    * The maximum supported task frequency of this scheduler, i.e. the inverse
@@ -171,3 +269,10 @@ trait Cancellable {
   def isCancelled: Boolean
 }
 //#cancellable
+
+object Cancellable {
+  val alreadyCancelled: Cancellable = new Cancellable {
+    def cancel(): Boolean = false
+    def isCancelled: Boolean = true
+  }
+}

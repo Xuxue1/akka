@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.contrib.mailbox
 
 import java.util.concurrent.{ ConcurrentHashMap, ConcurrentLinkedQueue }
@@ -10,6 +11,7 @@ import com.typesafe.config.Config
 import akka.actor.{ ActorContext, ActorRef, ActorSystem, ExtendedActorSystem, Extension, ExtensionId, ExtensionIdProvider }
 import akka.dispatch.{ Envelope, MailboxType, MessageQueue, UnboundedQueueBasedMessageQueue }
 
+@deprecated("Use an explicit supervisor or proxy actor instead", "2.5.0")
 object PeekMailboxExtension extends ExtensionId[PeekMailboxExtension] with ExtensionIdProvider {
   def lookup = this
   def createExtension(s: ExtendedActorSystem) = new PeekMailboxExtension(s)
@@ -17,6 +19,7 @@ object PeekMailboxExtension extends ExtensionId[PeekMailboxExtension] with Exten
   def ack()(implicit context: ActorContext): Unit = PeekMailboxExtension(context.system).ack()
 }
 
+@deprecated("Use an explicit supervisor or proxy actor instead", "2.5.0")
 class PeekMailboxExtension(val system: ExtendedActorSystem) extends Extension {
   private val mailboxes = new ConcurrentHashMap[ActorRef, PeekMailbox]
 
@@ -40,6 +43,7 @@ class PeekMailboxExtension(val system: ExtendedActorSystem) extends Extension {
  *   }
  * }}}
  */
+@deprecated("Use an explicit supervisor or proxy actor instead", "2.5.0")
 class PeekMailboxType(settings: ActorSystem.Settings, config: Config) extends MailboxType {
   override def create(owner: Option[ActorRef], system: Option[ActorSystem]) = (owner, system) match {
     case (Some(o), Some(s)) ⇒
@@ -52,6 +56,7 @@ class PeekMailboxType(settings: ActorSystem.Settings, config: Config) extends Ma
   }
 }
 
+@deprecated("Use an explicit supervisor or proxy actor instead", "2.5.0")
 class PeekMailbox(owner: ActorRef, system: ActorSystem, maxRetries: Int)
   extends UnboundedQueueBasedMessageQueue {
   final val queue = new ConcurrentLinkedQueue[Envelope]()

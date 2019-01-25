@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.actor
@@ -44,12 +44,14 @@ package akka.actor
  * There is also an unrestricted version [[akka.actor.UntypedActorWithUnrestrictedStash]] that does not
  * enforce the mailbox type.
  */
+@deprecated("Use AbstractActorWithStash instead of UntypedActorWithStash.", since = "2.5.0")
 abstract class UntypedActorWithStash extends UntypedActor with Stash
 
 /**
  * Actor base class with `Stash` that enforces an unbounded deque for the actor.
  * See [[akka.actor.UntypedActorWithStash]] for details on how `Stash` works.
  */
+@deprecated("Use AbstractActorWithUnboundedStash instead of UntypedActorWithUnboundedStash.", since = "2.5.0")
 abstract class UntypedActorWithUnboundedStash extends UntypedActor with UnboundedStash
 
 /**
@@ -57,4 +59,5 @@ abstract class UntypedActorWithUnboundedStash extends UntypedActor with Unbounde
  * manually, and the mailbox should extend the [[akka.dispatch.DequeBasedMessageQueueSemantics]] marker trait.
  * See [[akka.actor.UntypedActorWithStash]] for details on how `Stash` works.
  */
+@deprecated("Use AbstractActorWithUnrestrictedStash instead of UntypedActorWithUnrestrictedStash.", since = "2.5.0")
 abstract class UntypedActorWithUnrestrictedStash extends UntypedActor with UnrestrictedStash

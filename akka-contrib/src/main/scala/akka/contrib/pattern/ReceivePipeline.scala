@@ -1,7 +1,12 @@
+/*
+ * Copyright (C) 2018-2019 Lightbend Inc. <https://www.lightbend.com>
+ */
+
 package akka.contrib.pattern
 
 import akka.actor.Actor
 
+@deprecated("Feel free to copy", "2.5.0")
 object ReceivePipeline {
   /**
    * Result returned by an interceptor PF to determine what/whether to delegate to the next inner interceptor
@@ -43,6 +48,7 @@ object ReceivePipeline {
  * for configuring a chain of interceptors to be applied around
  * Actor's current behavior.
  */
+@deprecated("Feel free to copy", "2.5.0")
 trait ReceivePipeline extends Actor {
   import ReceivePipeline._
 
@@ -67,8 +73,8 @@ trait ReceivePipeline extends Actor {
   }
 
   private def combinedDecorator: Receive ⇒ Receive = { receive ⇒
-    // So that reconstructed Receive PF is undefined only when the actor's 
-    // receive is undefined for a transformed message that reaches it...     
+    // So that reconstructed Receive PF is undefined only when the actor's
+    // receive is undefined for a transformed message that reaches it...
     val innerReceiveHandler: Handler = {
       case msg ⇒ receive.lift(msg).map(_ ⇒ Done).getOrElse(Undefined)
     }
@@ -76,7 +82,7 @@ trait ReceivePipeline extends Actor {
     val zipped = pipeline.foldRight(innerReceiveHandler) { (outerInterceptor, innerHandler) ⇒
       outerInterceptor.andThen {
         case Inner(msg)                ⇒ innerHandler(msg)
-        case InnerAndAfter(msg, after) ⇒ try innerHandler(msg) finally after()
+        case InnerAndAfter(msg, after) ⇒ try innerHandler(msg) finally after(())
         case HandledCompletely         ⇒ Done
       }
     }

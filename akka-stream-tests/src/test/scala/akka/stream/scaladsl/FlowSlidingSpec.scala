@@ -1,9 +1,10 @@
-/**
- * Copyright (C) 2015-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2015-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.scaladsl
 
-import akka.stream.testkit.Utils._
+import akka.stream.testkit.scaladsl.StreamTestKit._
 import akka.stream.{ ActorMaterializer, ActorMaterializerSettings }
 import akka.stream.testkit._
 import org.scalacheck.Gen
@@ -31,7 +32,7 @@ class FlowSlidingSpec extends StreamSpec with GeneratorDrivenPropertyChecks {
       check(for {
         len ← Gen.choose(0, 31)
         win ← Gen.choose(1, 61)
-        step ← Gen.choose(1, win - 1)
+        step ← Gen.choose(1, (win - 1) max 1)
       } yield (len, win, step))
     }
 

@@ -1,12 +1,11 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.util;
 
 import org.junit.Test;
 import org.scalatest.junit.JUnitSuite;
-import org.scalatest.junit.JUnitSuiteLike;
-import scala.concurrent.duration.Duration;
 
 import static junit.framework.TestCase.assertEquals;
 
@@ -26,5 +25,4 @@ public class ByteStringTest extends JUnitSuite {
     sb.append(ByteString.fromString("World"));
     assertEquals(ByteString.fromString("Hello World"), sb.result());
   }
-
 }

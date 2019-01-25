@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.cluster
@@ -17,6 +17,7 @@ object StartupWithOneThreadSpec {
     akka.actor.provider = "cluster"
     akka.actor.creation-timeout = 10s
     akka.remote.netty.tcp.port = 0
+    akka.remote.artery.canonical.port = 0
 
     akka.actor.default-dispatcher {
       executor = thread-pool-executor

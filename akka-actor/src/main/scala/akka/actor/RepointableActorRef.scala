@@ -1,18 +1,20 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.actor
 
 import java.util.{ LinkedList ⇒ JLinkedList }
 import java.util.concurrent.locks.ReentrantLock
+
 import scala.annotation.tailrec
 import scala.collection.immutable
 import akka.actor.dungeon.ChildrenContainer
 import akka.event.Logging.Warning
-import akka.util.Unsafe
+import akka.util.{ Unsafe, unused }
 import akka.dispatch._
 import akka.dispatch.sysmsg._
+
 import scala.util.control.NonFatal
 
 /**
@@ -77,7 +79,7 @@ private[akka] class RepointableActorRef(
         supervisor.sendSystemMessage(Supervise(this, async))
         if (!async) point(false)
         this
-      case other ⇒ throw new IllegalStateException("initialize called more than once!")
+      case _ ⇒ throw new IllegalStateException("initialize called more than once!")
     }
 
   /**
@@ -115,7 +117,7 @@ private[akka] class RepointableActorRef(
    * This is called by activate() to obtain the cell which is to replace the
    * unstarted cell. The cell must be fully functional.
    */
-  def newCell(old: UnstartedCell): Cell =
+  def newCell(@unused old: UnstartedCell): Cell =
     new ActorCell(system, this, props, dispatcher, supervisor).init(sendSupervise = false, mailboxType)
 
   def start(): Unit = ()

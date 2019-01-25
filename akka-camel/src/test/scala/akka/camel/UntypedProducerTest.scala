@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.camel
@@ -79,7 +79,7 @@ class UntypedProducerTest extends WordSpec with Matchers with BeforeAndAfterAll 
 
 object UntypedProducerTest {
   class TestRoute extends RouteBuilder {
-    def configure {
+    def configure: Unit = {
       from("direct:forward-test-1").to("mock:mock")
       from("direct:producer-test-1").process(new Processor() {
         def process(exchange: Exchange) = {

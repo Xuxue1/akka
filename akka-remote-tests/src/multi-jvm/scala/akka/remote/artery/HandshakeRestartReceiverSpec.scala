@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2016-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.remote.artery
 
 import scala.concurrent.Await
@@ -9,7 +10,6 @@ import scala.concurrent.duration._
 import akka.actor._
 import akka.remote.AddressUidExtension
 import akka.remote.RARP
-import akka.remote.testconductor.RoleName
 import akka.remote.testkit.MultiNodeConfig
 import akka.remote.testkit.MultiNodeSpec
 import akka.remote.testkit.STMultiNodeSpec
@@ -99,13 +99,13 @@ abstract class HandshakeRestartReceiverSpec
       }
 
       runOn(second) {
-        val addr = system.asInstanceOf[ExtendedActorSystem].provider.getDefaultAddress
+        val address = system.asInstanceOf[ExtendedActorSystem].provider.getDefaultAddress
         enterBarrier("before-shutdown")
 
         Await.result(system.whenTerminated, 10.seconds)
 
         val freshSystem = ActorSystem(system.name, ConfigFactory.parseString(s"""
-              akka.remote.artery.canonical.port = ${addr.port.get}
+              akka.remote.artery.canonical.port = ${address.port.get}
               """).withFallback(system.settings.config))
         freshSystem.actorOf(Props[Subject], "subject2")
 

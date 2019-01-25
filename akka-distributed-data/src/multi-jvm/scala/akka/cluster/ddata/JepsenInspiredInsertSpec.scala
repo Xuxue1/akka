@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.cluster.ddata
 
 import scala.concurrent.duration._
@@ -48,7 +49,8 @@ class JepsenInspiredInsertSpec extends MultiNodeSpec(JepsenInspiredInsertSpec) w
 
   override def initialParticipants = roles.size
 
-  implicit val cluster = Cluster(system)
+  val cluster = Cluster(system)
+  implicit val selfUniqueAddress = DistributedData(system).selfUniqueAddress
   val replicator = DistributedData(system).replicator
   val nodes = roles.drop(1) // controller not part of active nodes
   val nodeCount = nodes.size
@@ -113,7 +115,7 @@ class JepsenInspiredInsertSpec extends MultiNodeSpec(JepsenInspiredInsertSpec) w
       val writeProbe = TestProbe()
       val writeAcks = myData.map { i ⇒
         sleepDelay()
-        replicator.tell(Update(key, ORSet(), WriteLocal, Some(i))(_ + i), writeProbe.ref)
+        replicator.tell(Update(key, ORSet(), WriteLocal, Some(i))(_ :+ i), writeProbe.ref)
         writeProbe.receiveOne(3.seconds)
       }
       val successWriteAcks = writeAcks.collect { case success: UpdateSuccess[_] ⇒ success }
@@ -146,7 +148,7 @@ class JepsenInspiredInsertSpec extends MultiNodeSpec(JepsenInspiredInsertSpec) w
       val writeProbe = TestProbe()
       val writeAcks = myData.map { i ⇒
         sleepDelay()
-        replicator.tell(Update(key, ORSet(), writeMajority, Some(i))(_ + i), writeProbe.ref)
+        replicator.tell(Update(key, ORSet(), writeMajority, Some(i))(_ :+ i), writeProbe.ref)
         writeProbe.receiveOne(timeout + 1.second)
       }
       val successWriteAcks = writeAcks.collect { case success: UpdateSuccess[_] ⇒ success }
@@ -162,7 +164,7 @@ class JepsenInspiredInsertSpec extends MultiNodeSpec(JepsenInspiredInsertSpec) w
       val readProbe = TestProbe()
       replicator.tell(Get(key, readMajority), readProbe.ref)
       val result = readProbe.expectMsgPF() { case g @ GetSuccess(`key`, _) ⇒ g.get(key) }
-      val survivors = result.elements.size
+      //val survivors = result.elements.size
       result.elements should be(expectedData)
 
     }
@@ -190,7 +192,7 @@ class JepsenInspiredInsertSpec extends MultiNodeSpec(JepsenInspiredInsertSpec) w
       val writeProbe = TestProbe()
       val writeAcks = myData.map { i ⇒
         sleepDelay()
-        replicator.tell(Update(key, ORSet(), WriteLocal, Some(i))(_ + i), writeProbe.ref)
+        replicator.tell(Update(key, ORSet(), WriteLocal, Some(i))(_ :+ i), writeProbe.ref)
         writeProbe.receiveOne(3.seconds)
       }
       val successWriteAcks = writeAcks.collect { case success: UpdateSuccess[_] ⇒ success }
@@ -235,7 +237,7 @@ class JepsenInspiredInsertSpec extends MultiNodeSpec(JepsenInspiredInsertSpec) w
       val writeProbe = TestProbe()
       val writeAcks = myData.map { i ⇒
         sleepDelay()
-        replicator.tell(Update(key, ORSet(), writeMajority, Some(i))(_ + i), writeProbe.ref)
+        replicator.tell(Update(key, ORSet(), writeMajority, Some(i))(_ :+ i), writeProbe.ref)
         writeProbe.receiveOne(timeout + 1.second)
       }
       val successWriteAcks = writeAcks.collect { case success: UpdateSuccess[_] ⇒ success }
@@ -259,7 +261,7 @@ class JepsenInspiredInsertSpec extends MultiNodeSpec(JepsenInspiredInsertSpec) w
         val readProbe = TestProbe()
         replicator.tell(Get(key, readMajority), readProbe.ref)
         val result = readProbe.expectMsgPF() { case g @ GetSuccess(`key`, _) ⇒ g.get(key) }
-        val survivors = result.elements.size
+        //val survivors = result.elements.size
         result.elements should be(expectedData)
       }
       // but on the 3 node side, read from majority doesn't mean that we are guaranteed to see

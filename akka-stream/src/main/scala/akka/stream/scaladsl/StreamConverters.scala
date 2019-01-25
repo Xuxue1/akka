@@ -1,11 +1,11 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.scaladsl
 
 import java.io.{ OutputStream, InputStream }
 import java.util.Spliterators
-import java.util.concurrent.atomic.AtomicReference
 import java.util.stream.{ Collector, StreamSupport }
 
 import akka.stream.{ Attributes, SinkShape, IOResult }
@@ -29,10 +29,12 @@ object StreamConverters {
 
   /**
    * Creates a Source from an [[InputStream]] created by the given function.
-   * Emitted elements are `chunkSize` sized [[akka.util.ByteString]] elements,
-   * except the final element, which will be up to `chunkSize` in size.
+   * Emitted elements are up to `chunkSize` sized [[akka.util.ByteString]] elements.
+   * The actual size of emitted elements depends how much data the underlying
+   * [[java.io.InputStream]] returns on each read invocation. Such chunks will
+   * never be larger than chunkSize though.
    *
-   * You can configure the default dispatcher for this Source by changing the `akka.stream.blocking-io-dispatcher` or
+   * You can configure the default dispatcher for this Source by changing the `akka.stream.materializer.blocking-io-dispatcher` or
    * set it for a given Source by using [[akka.stream.ActorAttributes]].
    *
    * It materializes a [[Future]] of [[IOResult]] containing the number of bytes read from the source file upon completion,
@@ -44,7 +46,7 @@ object StreamConverters {
    * @param chunkSize the size of each read operation, defaults to 8192
    */
   def fromInputStream(in: () ⇒ InputStream, chunkSize: Int = 8192): Source[ByteString, Future[IOResult]] =
-    new Source(new InputStreamSource(in, chunkSize, DefaultAttributes.inputStreamSource, sourceShape("InputStreamSource")))
+    Source.fromGraph(new InputStreamSource(in, chunkSize, DefaultAttributes.inputStreamSource, sourceShape("InputStreamSource")))
 
   /**
    * Creates a Source which when materialized will return an [[OutputStream]] which it is possible
@@ -52,7 +54,7 @@ object StreamConverters {
    *
    * This Source is intended for inter-operation with legacy APIs since it is inherently blocking.
    *
-   * You can configure the default dispatcher for this Source by changing the `akka.stream.blocking-io-dispatcher` or
+   * You can configure the default dispatcher for this Source by changing the `akka.stream.materializer.blocking-io-dispatcher` or
    * set it for a given Source by using [[akka.stream.ActorAttributes]].
    *
    * The created [[OutputStream]] will be closed when the [[Source]] is cancelled, and closing the [[OutputStream]]
@@ -69,7 +71,7 @@ object StreamConverters {
    * Materializes a [[Future]] of [[IOResult]] that will be completed with the size of the file (in bytes) at the streams completion,
    * and a possible exception if IO operation was not completed successfully.
    *
-   * You can configure the default dispatcher for this Source by changing the `akka.stream.blocking-io-dispatcher` or
+   * You can configure the default dispatcher for this Source by changing the `akka.stream.materializer.blocking-io-dispatcher` or
    * set it for a given Source by using [[akka.stream.ActorAttributes]].
    * If `autoFlush` is true the OutputStream will be flushed whenever a byte array is written, defaults to false.
    *
@@ -77,7 +79,7 @@ object StreamConverters {
    * will cancel the stream when the [[OutputStream]] is no longer writable.
    */
   def fromOutputStream(out: () ⇒ OutputStream, autoFlush: Boolean = false): Sink[ByteString, Future[IOResult]] =
-    new Sink(new OutputStreamSink(out, DefaultAttributes.outputStreamSink, sinkShape("OutputStreamSink"), autoFlush))
+    Sink.fromGraph(new OutputStreamSink(out, DefaultAttributes.outputStreamSink, sinkShape("OutputStreamSink"), autoFlush))
 
   /**
    * Creates a Sink which when materialized will return an [[InputStream]] which it is possible
@@ -85,7 +87,7 @@ object StreamConverters {
    *
    * This Sink is intended for inter-operation with legacy APIs since it is inherently blocking.
    *
-   * You can configure the default dispatcher for this Source by changing the `akka.stream.blocking-io-dispatcher` or
+   * You can configure the default dispatcher for this Source by changing the `akka.stream.materializer.blocking-io-dispatcher` or
    * set it for a given Source by using [[akka.stream.ActorAttributes]].
    *
    * The [[InputStream]] will be closed when the stream flowing into this [[Sink]] completes, and
@@ -162,11 +164,12 @@ object StreamConverters {
    * configured through the ``akka.stream.blocking-io-dispatcher``.
    */
   def asJavaStream[T](): Sink[T, java.util.stream.Stream[T]] = {
-    Sink.fromGraph(new QueueSink[T]())
+    // TODO removing the QueueSink name, see issue #22523
+    Sink.fromGraph(new QueueSink[T]().withAttributes(Attributes.none))
       .mapMaterializedValue(queue ⇒ StreamSupport.stream(
         Spliterators.spliteratorUnknownSize(new java.util.Iterator[T] {
           var nextElementFuture: Future[Option[T]] = queue.pull()
-          var nextElement: Option[T] = null
+          var nextElement: Option[T] = _
 
           override def hasNext: Boolean = {
             nextElement = Await.result(nextElementFuture, Inf)
@@ -191,9 +194,6 @@ object StreamConverters {
    * You can use [[Source.async]] to create asynchronous boundaries between synchronous Java ``Stream``
    * and the rest of flow.
    */
-  def fromJavaStream[T, S <: java.util.stream.BaseStream[T, S]](stream: () ⇒ java.util.stream.BaseStream[T, S]): Source[T, NotUsed] = {
-    import scala.collection.JavaConverters._
-    Source.fromIterator(() ⇒ stream().iterator().asScala).withAttributes(DefaultAttributes.fromJavaStream)
-  }
-
+  def fromJavaStream[T, S <: java.util.stream.BaseStream[T, S]](stream: () ⇒ java.util.stream.BaseStream[T, S]): Source[T, NotUsed] =
+    Source.fromGraph(new JavaStreamSource[T, S](stream)).withAttributes(DefaultAttributes.fromJavaStream)
 }

@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2015-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2015-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.dispatch
 
 import language.postfixOps
@@ -50,7 +51,7 @@ class StablePriorityDispatcherSpec extends AkkaSpec(StablePriorityDispatcherSpec
         testOrdering(dispatcherKey)
       }
 
-    def testOrdering(dispatcherKey: String) {
+    def testOrdering(dispatcherKey: String): Unit = {
       val msgs = (1 to 200) toList
       val shuffled = scala.util.Random.shuffle(msgs)
 

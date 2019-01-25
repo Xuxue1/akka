@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.actor
@@ -24,6 +24,7 @@ import akka.event.Logging
 import java.util.concurrent.atomic.AtomicInteger
 import java.lang.System.identityHashCode
 import akka.util.Helpers.ConfigOps
+import akka.testkit.LongRunningTest
 
 object SupervisorHierarchySpec {
   import FSM.`→`
@@ -40,7 +41,7 @@ object SupervisorHierarchySpec {
       case p: Props ⇒ sender() ! context.actorOf(p)
     }
     // test relies on keeping children around during restart
-    override def preRestart(cause: Throwable, msg: Option[Any]) {}
+    override def preRestart(cause: Throwable, msg: Option[Any]): Unit = {}
     override def postRestart(reason: Throwable) = {
       countDown.countDown()
     }
@@ -134,7 +135,7 @@ object SupervisorHierarchySpec {
     var failed = false
     var suspended = false
 
-    def abort(msg: String) {
+    def abort(msg: String): Unit = {
       listener ! ErrorLog(msg, log)
       log = Vector(Event("log sent", identityHashCode(this)))
       context.parent ! Abort
@@ -149,7 +150,7 @@ object SupervisorHierarchySpec {
 
     def suspendCount = context.asInstanceOf[ActorCell].mailbox.suspendCount
 
-    override def preStart {
+    override def preStart: Unit = {
       log :+= Event("started", identityHashCode(this))
       listener ! Ready(self)
       val s = size - 1 // subtract myself
@@ -159,11 +160,11 @@ object SupervisorHierarchySpec {
           val sizes = s / kids
           var rest = s % kids
           val propsTemplate = Props.empty.withDispatcher("hierarchy")
-          (1 to kids).map { (id) ⇒
+          (1 to kids).iterator.map { (id) ⇒
             val kidSize = if (rest > 0) { rest -= 1; sizes + 1 } else sizes
             val props = Props(new Hierarchy(kidSize, breadth, listener, myLevel + 1, random)).withDeploy(propsTemplate.deploy)
             (context.watch(context.actorOf(props, id.toString)).path, kidSize)
-          }(collection.breakOut)
+          }.toMap
         } else Map()
       stateCache.put(self.path, HierarchyState(log, kidInfo, null))
     }
@@ -220,7 +221,7 @@ object SupervisorHierarchySpec {
         Resume
     })
 
-    override def postRestart(cause: Throwable) {
+    override def postRestart(cause: Throwable): Unit = {
       val state = stateCache.get(self.path)
       log = state.log
       log :+= Event("restarted " + suspendCount + " " + cause, identityHashCode(this))
@@ -243,7 +244,7 @@ object SupervisorHierarchySpec {
       }
     }
 
-    override def postStop {
+    override def postStop: Unit = {
       if (failed || suspended) {
         listener ! ErrorLog("not resumed (" + failed + ", " + suspended + ")", log)
         val state = stateCache.get(self)
@@ -432,15 +433,15 @@ object SupervisorHierarchySpec {
 
     var hierarchy: ActorRef = _
 
-    override def preRestart(cause: Throwable, msg: Option[Any]) {
-      throw new ActorKilledException("I want to DIE")
+    override def preRestart(cause: Throwable, msg: Option[Any]): Unit = {
+      throw ActorKilledException("I want to DIE")
     }
 
-    override def postRestart(cause: Throwable) {
-      throw new ActorKilledException("I said I wanted to DIE, dammit!")
+    override def postRestart(cause: Throwable): Unit = {
+      throw ActorKilledException("I said I wanted to DIE, dammit!")
     }
 
-    override def postStop {
+    override def postStop: Unit = {
       testActor ! "stressTestStopped"
     }
 
@@ -728,7 +729,7 @@ class SupervisorHierarchySpec extends AkkaSpec(SupervisorHierarchySpec.config) w
 
   "A Supervisor Hierarchy" must {
 
-    "restart manager and workers in AllForOne" in {
+    "restart manager and workers in AllForOne" taggedAs LongRunningTest in {
       val countDown = new CountDownLatch(4)
 
       val boss = system.actorOf(Props(new Supervisor(OneForOneStrategy()(List(classOf[Exception])))))
@@ -749,7 +750,7 @@ class SupervisorHierarchySpec extends AkkaSpec(SupervisorHierarchySpec.config) w
       }
     }
 
-    "send notification to supervisor when permanent failure" in {
+    "send notification to supervisor when permanent failure" taggedAs LongRunningTest in {
       val countDownMessages = new CountDownLatch(1)
       val countDownMax = new CountDownLatch(1)
       val boss = system.actorOf(Props(new Actor {
@@ -773,7 +774,7 @@ class SupervisorHierarchySpec extends AkkaSpec(SupervisorHierarchySpec.config) w
       }
     }
 
-    "resume children after Resume" in {
+    "resume children after Resume" taggedAs LongRunningTest in {
       val boss = system.actorOf(Props[Resumer], "resumer")
       boss ! "spawn"
       val middle = expectMsgType[ActorRef]
@@ -790,7 +791,7 @@ class SupervisorHierarchySpec extends AkkaSpec(SupervisorHierarchySpec.config) w
       expectMsg("pong")
     }
 
-    "suspend children while failing" in {
+    "suspend children while failing" taggedAs LongRunningTest in {
       val latch = TestLatch()
       val slowResumer = system.actorOf(Props(new Actor {
         override def supervisorStrategy = OneForOneStrategy() { case _ ⇒ Await.ready(latch, 4.seconds.dilated); SupervisorStrategy.Resume }
@@ -816,7 +817,7 @@ class SupervisorHierarchySpec extends AkkaSpec(SupervisorHierarchySpec.config) w
       expectMsg("pong")
     }
 
-    "handle failure in creation when supervision startegy returns Resume and Restart" in {
+    "handle failure in creation when supervision strategy returns Resume and Restart" taggedAs LongRunningTest in {
       val createAttempt = new AtomicInteger(0)
       val preStartCalled = new AtomicInteger(0)
       val postRestartCalled = new AtomicInteger(0)
@@ -866,7 +867,7 @@ class SupervisorHierarchySpec extends AkkaSpec(SupervisorHierarchySpec.config) w
       postRestartCalled.get should ===(0)
     }
 
-    "survive being stressed" in {
+    "survive being stressed" taggedAs LongRunningTest in {
       system.eventStream.publish(Mute(
         EventFilter[Failure](),
         EventFilter.warning("Failure"),

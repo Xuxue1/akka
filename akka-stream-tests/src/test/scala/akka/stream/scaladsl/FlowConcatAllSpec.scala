@@ -1,16 +1,17 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.scaladsl
 
 import akka.NotUsed
-import akka.stream.impl.ConstantFun
+import akka.util.ConstantFun
 
 import scala.util.control.NoStackTrace
 import akka.stream.ActorMaterializer
 import akka.stream.ActorMaterializerSettings
 import akka.stream.testkit._
-import akka.stream.testkit.Utils._
+import akka.stream.testkit.scaladsl.StreamTestKit._
 
 class FlowConcatAllSpec extends StreamSpec {
 

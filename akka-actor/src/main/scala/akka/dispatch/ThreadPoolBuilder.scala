@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.dispatch
@@ -7,7 +7,7 @@ package akka.dispatch
 import java.util.Collection
 import scala.concurrent.{ BlockContext, CanAwait }
 import scala.concurrent.duration.Duration
-import scala.concurrent.forkjoin._
+import akka.dispatch.forkjoin._
 import java.util.concurrent.{
   ArrayBlockingQueue,
   BlockingQueue,
@@ -210,7 +210,7 @@ trait ExecutorServiceDelegate extends ExecutorService {
 
   def execute(command: Runnable) = executor.execute(command)
 
-  def shutdown() { executor.shutdown() }
+  def shutdown(): Unit = { executor.shutdown() }
 
   def shutdownNow() = executor.shutdownNow()
 

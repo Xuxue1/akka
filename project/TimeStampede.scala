@@ -1,7 +1,13 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka
+
+import java.time.Instant
+import java.time.LocalDateTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 import sbt._
 import sbt.Keys._
@@ -11,14 +17,13 @@ object TimeStampede extends AutoPlugin {
   override def trigger = noTrigger
 
   override lazy val projectSettings = Seq(
-    commands += stampVersion
-  )
+    commands += stampVersion)
 
   final val Snapshot = "-SNAPSHOT"
 
-  def stampVersion = Command.command("stampVersion") { state =>
+  def stampVersion = Command.command("stampVersion") { state ⇒
     val extracted = Project.extract(state)
-    extracted.append(List(version in ThisBuild ~= stamp), state)
+    extracted.appendWithSession(List(version in ThisBuild ~= stamp), state)
   }
 
   def stamp(version: String): String = {
@@ -26,8 +31,9 @@ object TimeStampede extends AutoPlugin {
     else version
   }
 
+  val formatter = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")
+
   def timestamp(time: Long): String = {
-    val format = new java.text.SimpleDateFormat("yyyyMMdd-HHmmss")
-    format.format(new java.util.Date(time))
+    formatter.format(LocalDateTime.ofInstant(Instant.ofEpochMilli(time), ZoneId.systemDefault()))
   }
 }

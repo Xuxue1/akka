@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.cluster
@@ -226,7 +226,7 @@ abstract class TransitionSpec
       enterBarrier("after-3")
     }
 
-    "perform correct transitions when second becomes unavailble" taggedAs LongRunningTest in {
+    "perform correct transitions when second becomes unavailable" taggedAs LongRunningTest in {
       runOn(third) {
         markNodeAsUnavailable(second)
         reapUnreachable()
@@ -234,7 +234,7 @@ abstract class TransitionSpec
         awaitAssert(seenLatestGossip should ===(Set(third)))
       }
 
-      enterBarrier("after-second-unavailble")
+      enterBarrier("after-second-unavailable")
 
       third gossipTo first
 

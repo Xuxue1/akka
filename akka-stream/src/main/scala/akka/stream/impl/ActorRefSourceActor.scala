@@ -1,30 +1,35 @@
-/**
- * Copyright (C) 2015-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2015-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.impl
 
 import akka.actor.ActorLogging
 import akka.actor.Props
 import akka.actor.Status
+import akka.annotation.InternalApi
 import akka.stream.OverflowStrategies._
-import akka.stream.{ BufferOverflowException, OverflowStrategy, OverflowStrategies }
+import akka.stream.{ BufferOverflowException, OverflowStrategies, OverflowStrategy }
 import akka.stream.ActorMaterializerSettings
 
 /**
  * INTERNAL API
  */
-private[akka] object ActorRefSourceActor {
-  def props(bufferSize: Int, overflowStrategy: OverflowStrategy, settings: ActorMaterializerSettings) = {
+@InternalApi private[akka] object ActorRefSourceActor {
+  def props(completionMatcher: PartialFunction[Any, Unit], failureMatcher: PartialFunction[Any, Throwable],
+            bufferSize: Int, overflowStrategy: OverflowStrategy, settings: ActorMaterializerSettings) = {
     require(overflowStrategy != OverflowStrategies.Backpressure, "Backpressure overflowStrategy not supported")
     val maxFixedBufferSize = settings.maxFixedBufferSize
-    Props(new ActorRefSourceActor(bufferSize, overflowStrategy, maxFixedBufferSize))
+    Props(new ActorRefSourceActor(completionMatcher, failureMatcher, bufferSize, overflowStrategy, maxFixedBufferSize))
   }
 }
 
 /**
  * INTERNAL API
  */
-private[akka] class ActorRefSourceActor(bufferSize: Int, overflowStrategy: OverflowStrategy, maxFixedBufferSize: Int)
+@InternalApi private[akka] class ActorRefSourceActor(
+  completionMatcher: PartialFunction[Any, Unit], failureMatcher: PartialFunction[Any, Throwable],
+  bufferSize: Int, overflowStrategy: OverflowStrategy, maxFixedBufferSize: Int)
   extends akka.stream.actor.ActorPublisher[Any] with ActorLogging {
   import akka.stream.actor.ActorPublisherMessage._
 
@@ -34,15 +39,21 @@ private[akka] class ActorRefSourceActor(bufferSize: Int, overflowStrategy: Overf
   def receive = ({
     case Cancel ⇒
       context.stop(self)
+  }: Receive)
+    .orElse(requestElem)
+    .orElse(receiveFailure)
+    .orElse(receiveComplete)
+    .orElse(receiveElem)
 
-    case _: Status.Success ⇒
-      if (bufferSize == 0 || buffer.isEmpty) context.stop(self) // will complete the stream successfully
-      else context.become(drainBufferThenComplete)
+  def receiveComplete: Receive = completionMatcher.andThen { _ ⇒
+    if (bufferSize == 0 || buffer.isEmpty) onCompleteThenStop() // will complete the stream successfully
+    else context.become(drainBufferThenComplete)
+  }
 
-    case Status.Failure(cause) if isActive ⇒
+  def receiveFailure: Receive = failureMatcher.andThen { cause ⇒
+    if (isActive)
       onErrorThenStop(cause)
-
-  }: Receive).orElse(requestElem).orElse(receiveElem)
+  }
 
   def requestElem: Receive = {
     case _: Request ⇒
@@ -61,27 +72,27 @@ private[akka] class ActorRefSourceActor(bufferSize: Int, overflowStrategy: Overf
       else if (!buffer.isFull)
         buffer.enqueue(elem)
       else overflowStrategy match {
-        case DropHead ⇒
-          log.debug("Dropping the head element because buffer is full and overflowStrategy is: [DropHead]")
+        case s: DropHead ⇒
+          log.log(s.logLevel, "Dropping the head element because buffer is full and overflowStrategy is: [DropHead]")
           buffer.dropHead()
           buffer.enqueue(elem)
-        case DropTail ⇒
-          log.debug("Dropping the tail element because buffer is full and overflowStrategy is: [DropTail]")
+        case s: DropTail ⇒
+          log.log(s.logLevel, "Dropping the tail element because buffer is full and overflowStrategy is: [DropTail]")
           buffer.dropTail()
           buffer.enqueue(elem)
-        case DropBuffer ⇒
-          log.debug("Dropping all the buffered elements because buffer is full and overflowStrategy is: [DropBuffer]")
+        case s: DropBuffer ⇒
+          log.log(s.logLevel, "Dropping all the buffered elements because buffer is full and overflowStrategy is: [DropBuffer]")
           buffer.clear()
           buffer.enqueue(elem)
-        case DropNew ⇒
+        case s: DropNew ⇒
           // do not enqueue new element if the buffer is full
-          log.debug("Dropping the new element because buffer is full and overflowStrategy is: [DropNew]")
-        case Fail ⇒
-          log.error("Failing because buffer is full and overflowStrategy is: [Fail]")
-          onErrorThenStop(new BufferOverflowException(s"Buffer overflow (max capacity was: $bufferSize)!"))
-        case Backpressure ⇒
+          log.log(s.logLevel, "Dropping the new element because buffer is full and overflowStrategy is: [DropNew]")
+        case s: Fail ⇒
+          log.log(s.logLevel, "Failing because buffer is full and overflowStrategy is: [Fail]")
+          onErrorThenStop(BufferOverflowException(s"Buffer overflow (max capacity was: $bufferSize)!"))
+        case s: Backpressure ⇒
           // there is a precondition check in Source.actorRefSource factory method
-          log.debug("Backpressuring because buffer is full and overflowStrategy is: [Backpressure]")
+          log.log(s.logLevel, "Backpressuring because buffer is full and overflowStrategy is: [Backpressure]")
       }
   }
 
@@ -99,7 +110,7 @@ private[akka] class ActorRefSourceActor(bufferSize: Int, overflowStrategy: Overf
       while (totalDemand > 0L && !buffer.isEmpty)
         onNext(buffer.dequeue())
 
-      if (buffer.isEmpty) context.stop(self) // will complete the stream successfully
+      if (buffer.isEmpty) onCompleteThenStop() // will complete the stream successfully
 
     case elem if isActive ⇒
       log.debug("Dropping element because Status.Success received already, " +

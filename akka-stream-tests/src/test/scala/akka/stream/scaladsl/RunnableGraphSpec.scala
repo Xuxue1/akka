@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2015-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2015-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.scaladsl
 
 import akka.NotUsed
@@ -17,8 +18,8 @@ class RunnableGraphSpec extends StreamSpec {
       import Attributes._
       val r: RunnableGraph[NotUsed] = RunnableGraph.fromGraph(Source.empty.to(Sink.ignore)).async.addAttributes(none).named("useless")
 
-      r.module.attributes.getFirst[Name] shouldEqual Some(Name("useless"))
-      r.module.attributes.getFirst[AsyncBoundary.type] shouldEqual (Some(AsyncBoundary))
+      r.traversalBuilder.attributes.getFirst[Name] shouldEqual Some(Name("useless"))
+      r.traversalBuilder.attributes.getFirst[AsyncBoundary.type] shouldEqual (Some(AsyncBoundary))
     }
 
   }

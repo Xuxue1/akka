@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.persistence
@@ -12,7 +12,7 @@ package object serialization {
    */
   def streamToBytes(inputStream: InputStream): Array[Byte] = {
     val len = 16384
-    val buf = Array.ofDim[Byte](len)
+    val buf = new Array[Byte](len)
     val out = new ByteArrayOutputStream
 
     @scala.annotation.tailrec

@@ -1,11 +1,14 @@
+/*
+ * Copyright (C) 2018-2019 Lightbend Inc. <https://www.lightbend.com>
+ */
+
 package akka.remote
 
 import scala.concurrent.duration._
 import com.typesafe.config.ConfigFactory
 import akka.actor._
 import akka.testkit._
-import akka.remote.testkit.{ MultiNodeConfig, MultiNodeSpec, STMultiNodeSpec }
-import akka.remote.testconductor.RoleName
+import akka.remote.testkit.MultiNodeConfig
 
 class PiercingShouldKeepQuarantineConfig(artery: Boolean) extends MultiNodeConfig {
   val first = role("first")
@@ -15,7 +18,7 @@ class PiercingShouldKeepQuarantineConfig(artery: Boolean) extends MultiNodeConfi
     ConfigFactory.parseString(s"""
       akka.remote.retry-gate-closed-for = 0.5s
       akka.remote.artery.enabled = $artery
-      """)).withFallback(RemotingMultiNodeSpec.arteryFlightRecordingConf))
+      """)).withFallback(RemotingMultiNodeSpec.commonConfig))
 
 }
 

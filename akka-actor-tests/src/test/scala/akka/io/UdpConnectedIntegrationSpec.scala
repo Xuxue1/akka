@@ -1,13 +1,14 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.io
 
 import java.net.InetSocketAddress
 import akka.testkit.{ TestProbe, ImplicitSender, AkkaSpec }
 import akka.util.ByteString
 import akka.actor.ActorRef
-import akka.testkit.SocketUtil._
+import akka.testkit.SocketUtil.temporaryServerAddresses
 
 class UdpConnectedIntegrationSpec extends AkkaSpec("""
     akka.loglevel = INFO

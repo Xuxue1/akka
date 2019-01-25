@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2015-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2015-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.stage;
 
 import akka.NotUsed;
@@ -11,12 +12,8 @@ import akka.stream.javadsl.Source;
 import akka.testkit.AkkaSpec;
 
 import org.junit.ClassRule;
-import org.junit.Ignore;
 import org.junit.Test;
 import static org.junit.Assert.assertEquals;
-import scala.concurrent.Await;
-import scala.concurrent.Future;
-import scala.concurrent.duration.Duration;
 
 import java.util.Arrays;
 import java.util.List;
@@ -29,8 +26,8 @@ public class StageTest extends StreamTest {
   }
 
   @ClassRule
-  public static AkkaJUnitActorSystemResource actorSystemResource = new AkkaJUnitActorSystemResource("FlowTest",
-    AkkaSpec.testConf());
+  public static AkkaJUnitActorSystemResource actorSystemResource =
+      new AkkaJUnitActorSystemResource("FlowTest", AkkaSpec.testConf());
 
   @Test
   public void javaStageUsage() throws Exception {
@@ -39,12 +36,12 @@ public class StageTest extends StreamTest {
     final JavaIdentityStage<Integer> identity = new JavaIdentityStage<Integer>();
 
     final CompletionStage<List<Integer>> result =
-      ints
-        .via(identity)
-        .via(identity)
-        .grouped(1000)
-        .runWith(Sink.<List<Integer>>head(), materializer);
+        ints.via(identity)
+            .via(identity)
+            .grouped(1000)
+            .runWith(Sink.<List<Integer>>head(), materializer);
 
-    assertEquals(Arrays.asList(0, 1, 2, 3, 4, 5), result.toCompletableFuture().get(3, TimeUnit.SECONDS));
+    assertEquals(
+        Arrays.asList(0, 1, 2, 3, 4, 5), result.toCompletableFuture().get(3, TimeUnit.SECONDS));
   }
 }

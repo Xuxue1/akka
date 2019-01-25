@@ -1,15 +1,18 @@
-/**
- * Copyright (C) 2015-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2015-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.impl
 
 import java.{ util ⇒ ju }
+
+import akka.annotation.InternalApi
 import akka.stream._
 
 /**
  * INTERNAL API
  */
-private[akka] trait Buffer[T] {
+@InternalApi private[akka] trait Buffer[T] {
   def capacity: Int
   def used: Int
   def isFull: Boolean
@@ -46,7 +49,7 @@ private[akka] object Buffer {
 /**
  * INTERNAL API
  */
-private[akka] object FixedSizeBuffer {
+@InternalApi private[akka] object FixedSizeBuffer {
 
   /**
    * INTERNAL API
@@ -57,7 +60,7 @@ private[akka] object FixedSizeBuffer {
    *
    * Returns a specialized instance for power-of-two sized buffers.
    */
-  def apply[T](size: Int): FixedSizeBuffer[T] =
+  @InternalApi private[akka] def apply[T](size: Int): FixedSizeBuffer[T] =
     if (size < 1) throw new IllegalArgumentException("size must be positive")
     else if (((size - 1) & size) == 0) new PowerOfTwoFixedSizeBuffer(size)
     else new ModuloFixedSizeBuffer(size)
@@ -71,6 +74,9 @@ private[akka] object FixedSizeBuffer {
     def used: Int = (writeIdx - readIdx).toInt
 
     def isFull: Boolean = used == capacity
+    def nonFull: Boolean = used < capacity
+    def remainingCapacity: Int = capacity - used
+
     def isEmpty: Boolean = used == 0
     def nonEmpty: Boolean = used != 0
 
@@ -140,7 +146,7 @@ private[akka] object FixedSizeBuffer {
 /**
  * INTERNAL API
  */
-private[akka] final class BoundedBuffer[T](val capacity: Int) extends Buffer[T] {
+@InternalApi private[akka] final class BoundedBuffer[T](val capacity: Int) extends Buffer[T] {
 
   def used: Int = q.used
   def isFull: Boolean = q.isFull

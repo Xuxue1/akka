@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.cluster.metrics
@@ -9,9 +9,7 @@ import scala.concurrent.duration._
 import com.typesafe.config.ConfigFactory
 import akka.remote.testkit.MultiNodeConfig
 import akka.remote.testkit.MultiNodeSpec
-import akka.actor.ExtendedActorSystem
 import akka.cluster.MultiNodeClusterSpec
-import akka.testkit.LongRunningTest
 import akka.cluster.MemberStatus
 
 trait ClusterMetricsCommonConfig extends MultiNodeConfig {
@@ -28,12 +26,9 @@ trait ClusterMetricsCommonConfig extends MultiNodeConfig {
   // Extract individual sigar library for every node.
   nodeList foreach { role ⇒
     nodeConfig(role) {
-      parseString("akka.cluster.metrics.native-library-extract-folder=${user.dir}/target/native/" + role.name)
+      parseString(s"akka.cluster.metrics.native-library-extract-folder=$${user.dir}/target/native/" + role.name)
     }
   }
-
-  // Disable legacy metrics in akka-cluster.
-  def disableMetricsLegacy = parseString("""akka.cluster.metrics.enabled=off""")
 
   // Enable metrics extension in akka-cluster-metrics.
   def enableMetricsExtension = parseString("""
@@ -56,7 +51,6 @@ object ClusterMetricsDisabledConfig extends ClusterMetricsCommonConfig {
   commonConfig {
     Seq(
       customLogging,
-      disableMetricsLegacy,
       disableMetricsExtension,
       debugConfig(on = false),
       MultiNodeClusterSpec.clusterConfigWithFailureDetectorPuppet)
@@ -65,12 +59,10 @@ object ClusterMetricsDisabledConfig extends ClusterMetricsCommonConfig {
 }
 
 object ClusterMetricsEnabledConfig extends ClusterMetricsCommonConfig {
-  import ConfigFactory._
 
   commonConfig {
     Seq(
       customLogging,
-      disableMetricsLegacy,
       enableMetricsExtension,
       debugConfig(on = false),
       MultiNodeClusterSpec.clusterConfigWithFailureDetectorPuppet)
@@ -141,7 +133,6 @@ class ClusterMetricsDisabledMultiJvmNode5 extends ClusterMetricsDisabledSpec
 
 abstract class ClusterMetricsDisabledSpec extends MultiNodeSpec(ClusterMetricsDisabledConfig)
   with MultiNodeClusterSpec with RedirectLogging {
-  import akka.cluster.ClusterEvent.CurrentClusterState
 
   val metricsView = new ClusterMetricsView(cluster.system)
 

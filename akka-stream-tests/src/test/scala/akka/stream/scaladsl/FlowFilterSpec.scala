@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2014-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2014-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.scaladsl
 
 import akka.stream.testkit.scaladsl.TestSink
@@ -8,7 +9,7 @@ import akka.stream.testkit.scaladsl.TestSink
 import java.util.concurrent.ThreadLocalRandom.{ current ⇒ random }
 import akka.stream.ActorAttributes._
 import akka.stream.Supervision._
-import akka.stream.testkit.Utils._
+import akka.stream.testkit.scaladsl.StreamTestKit._
 import akka.stream.ActorMaterializer
 import akka.stream.ActorMaterializerSettings
 import akka.stream.testkit._

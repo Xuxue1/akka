@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.cluster.ddata
 
 import scala.concurrent.duration._
@@ -42,7 +43,8 @@ class ReplicatorChaosSpec extends MultiNodeSpec(ReplicatorChaosSpec) with STMult
 
   override def initialParticipants = roles.size
 
-  implicit val cluster = Cluster(system)
+  val cluster = Cluster(system)
+  implicit val selfUniqueAddress = DistributedData(system).selfUniqueAddress
   val replicator = system.actorOf(Replicator.props(
     ReplicatorSettings(system).withRole("backend").withGossipInterval(1.second)), "replicator")
   val timeout = 3.seconds.dilated
@@ -82,7 +84,7 @@ class ReplicatorChaosSpec extends MultiNodeSpec(ReplicatorChaosSpec) with STMult
     within(5.seconds) {
       awaitAssert {
         replicator ! Get(key, ReadLocal)
-        expectMsg(DataDeleted(key))
+        expectMsg(DataDeleted(key, None))
       }
     }
 
@@ -103,18 +105,18 @@ class ReplicatorChaosSpec extends MultiNodeSpec(ReplicatorChaosSpec) with STMult
       }
 
       runOn(first) {
-        (0 until 5).foreach { i ⇒
-          replicator ! Update(KeyA, GCounter(), WriteLocal)(_ + 1)
-          replicator ! Update(KeyB, PNCounter(), WriteLocal)(_ - 1)
-          replicator ! Update(KeyC, GCounter(), WriteAll(timeout))(_ + 1)
+        for (_ ← 0 until 5) {
+          replicator ! Update(KeyA, GCounter(), WriteLocal)(_ :+ 1)
+          replicator ! Update(KeyB, PNCounter(), WriteLocal)(_ decrement 1)
+          replicator ! Update(KeyC, GCounter(), WriteAll(timeout))(_ :+ 1)
         }
         receiveN(15).map(_.getClass).toSet should be(Set(classOf[UpdateSuccess[_]]))
       }
 
       runOn(second) {
-        replicator ! Update(KeyA, GCounter(), WriteLocal)(_ + 20)
-        replicator ! Update(KeyB, PNCounter(), WriteTo(2, timeout))(_ + 20)
-        replicator ! Update(KeyC, GCounter(), WriteAll(timeout))(_ + 20)
+        replicator ! Update(KeyA, GCounter(), WriteLocal)(_ :+ 20)
+        replicator ! Update(KeyB, PNCounter(), WriteTo(2, timeout))(_ :+ 20)
+        replicator ! Update(KeyC, GCounter(), WriteAll(timeout))(_ :+ 20)
         receiveN(3).toSet should be(Set(
           UpdateSuccess(KeyA, None),
           UpdateSuccess(KeyB, None), UpdateSuccess(KeyC, None)))
@@ -122,26 +124,26 @@ class ReplicatorChaosSpec extends MultiNodeSpec(ReplicatorChaosSpec) with STMult
         replicator ! Update(KeyE, GSet(), WriteLocal)(_ + "e1" + "e2")
         expectMsg(UpdateSuccess(KeyE, None))
 
-        replicator ! Update(KeyF, ORSet(), WriteLocal)(_ + "e1" + "e2")
+        replicator ! Update(KeyF, ORSet(), WriteLocal)(_ :+ "e1" :+ "e2")
         expectMsg(UpdateSuccess(KeyF, None))
       }
 
       runOn(fourth) {
-        replicator ! Update(KeyD, GCounter(), WriteLocal)(_ + 40)
+        replicator ! Update(KeyD, GCounter(), WriteLocal)(_ :+ 40)
         expectMsg(UpdateSuccess(KeyD, None))
 
         replicator ! Update(KeyE, GSet(), WriteLocal)(_ + "e2" + "e3")
         expectMsg(UpdateSuccess(KeyE, None))
 
-        replicator ! Update(KeyF, ORSet(), WriteLocal)(_ + "e2" + "e3")
+        replicator ! Update(KeyF, ORSet(), WriteLocal)(_ :+ "e2" :+ "e3")
         expectMsg(UpdateSuccess(KeyF, None))
       }
 
       runOn(fifth) {
-        replicator ! Update(KeyX, GCounter(), WriteTo(2, timeout))(_ + 50)
+        replicator ! Update(KeyX, GCounter(), WriteTo(2, timeout))(_ :+ 50)
         expectMsg(UpdateSuccess(KeyX, None))
         replicator ! Delete(KeyX, WriteLocal)
-        expectMsg(DeleteSuccess(KeyX))
+        expectMsg(DeleteSuccess(KeyX, None))
       }
 
       enterBarrier("initial-updates-done")
@@ -167,22 +169,22 @@ class ReplicatorChaosSpec extends MultiNodeSpec(ReplicatorChaosSpec) with STMult
       enterBarrier("split")
 
       runOn(first) {
-        replicator ! Update(KeyA, GCounter(), WriteTo(2, timeout))(_ + 1)
+        replicator ! Update(KeyA, GCounter(), WriteTo(2, timeout))(_ :+ 1)
         expectMsg(UpdateSuccess(KeyA, None))
       }
 
       runOn(third) {
-        replicator ! Update(KeyA, GCounter(), WriteTo(2, timeout))(_ + 2)
+        replicator ! Update(KeyA, GCounter(), WriteTo(2, timeout))(_ :+ 2)
         expectMsg(UpdateSuccess(KeyA, None))
 
         replicator ! Update(KeyE, GSet(), WriteTo(2, timeout))(_ + "e4")
         expectMsg(UpdateSuccess(KeyE, None))
 
-        replicator ! Update(KeyF, ORSet(), WriteTo(2, timeout))(_ - "e2")
+        replicator ! Update(KeyF, ORSet(), WriteTo(2, timeout))(_ remove "e2")
         expectMsg(UpdateSuccess(KeyF, None))
       }
       runOn(fourth) {
-        replicator ! Update(KeyD, GCounter(), WriteTo(2, timeout))(_ + 1)
+        replicator ! Update(KeyD, GCounter(), WriteTo(2, timeout))(_ :+ 1)
         expectMsg(UpdateSuccess(KeyD, None))
       }
       enterBarrier("update-during-split")

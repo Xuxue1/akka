@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.dispatch
@@ -67,7 +67,7 @@ class Dispatcher(
   /**
    * INTERNAL API
    */
-  protected[akka] def executeTask(invocation: TaskInvocation) {
+  protected[akka] def executeTask(invocation: TaskInvocation): Unit = {
     try {
       executorService execute invocation
     } catch {
@@ -115,7 +115,7 @@ class Dispatcher(
           executorService execute mbox
           true
         } catch {
-          case e: RejectedExecutionException ⇒
+          case _: RejectedExecutionException ⇒
             try {
               executorService execute mbox
               true

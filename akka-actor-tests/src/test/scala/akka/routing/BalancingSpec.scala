@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.routing
 
 import java.util.concurrent.atomic.AtomicInteger
@@ -17,6 +18,9 @@ object BalancingSpec {
 
   class Worker(latch: TestLatch) extends Actor {
     lazy val id = counter.getAndIncrement()
+
+    override def preStart(): Unit = latch.countDown()
+
     def receive = {
       case msg: Int ⇒
         if (id != 1)
@@ -65,6 +69,10 @@ class BalancingSpec extends AkkaSpec(
   }
 
   def test(pool: ActorRef, latch: TestLatch): Unit = {
+    // wait until all routees have started
+    Await.ready(latch, remainingOrDefault)
+
+    latch.reset()
     val iterationCount = 100
 
     for (i ← 1 to iterationCount) {
@@ -77,7 +85,7 @@ class BalancingSpec extends AkkaSpec(
     // all replies from the unblocked worker so far
     replies1.toSet should be(Set(1))
 
-    latch.countDown()
+    latch.open()
     val replies2 = receiveN(poolSize - 1)
     // the remaining replies come from the blocked
     replies2.toSet should be((2 to poolSize).toSet)
@@ -88,21 +96,21 @@ class BalancingSpec extends AkkaSpec(
   "balancing pool" must {
 
     "deliver messages in a balancing fashion when defined programatically" in {
-      val latch = TestLatch(1)
+      val latch = TestLatch(poolSize)
       val pool = system.actorOf(BalancingPool(poolSize).props(routeeProps =
         Props(classOf[Worker], latch)), name = "balancingPool-1")
       test(pool, latch)
     }
 
     "deliver messages in a balancing fashion when defined in config" in {
-      val latch = TestLatch(1)
+      val latch = TestLatch(poolSize)
       val pool = system.actorOf(FromConfig().props(routeeProps =
         Props(classOf[Worker], latch)), name = "balancingPool-2")
       test(pool, latch)
     }
 
     "deliver messages in a balancing fashion when overridden in config" in {
-      val latch = TestLatch(1)
+      val latch = TestLatch(poolSize)
       val pool = system.actorOf(BalancingPool(1).props(routeeProps =
         Props(classOf[Worker], latch)), name = "balancingPool-3")
       test(pool, latch)

@@ -1,20 +1,18 @@
-/**
- * Copyright (C) 2015-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2015-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.cluster.sharding
 
 import java.io.File
 
 import scala.concurrent.duration._
-
 import akka.actor.Actor
 import akka.actor.ActorIdentity
 import akka.actor.ActorRef
 import akka.actor.Identify
 import akka.actor.Props
-import akka.cluster.Cluster
-import akka.cluster.ClusterEvent._
-import akka.cluster.MemberStatus
+import akka.cluster.{ Cluster, MemberStatus, MultiNodeClusterSpec }
 import akka.persistence.Persistence
 import akka.persistence.journal.leveldb.SharedLeveldbJournal
 import akka.persistence.journal.leveldb.SharedLeveldbStore
@@ -71,13 +69,17 @@ abstract class ClusterShardingLeavingSpecConfig(val mode: String) extends MultiN
       timeout = 5s
       store {
         native = off
-        dir = "target/journal-ClusterShardingLeavingSpec"
+        dir = "target/ClusterShardingLeavingSpec/journal"
       }
     }
     akka.persistence.snapshot-store.plugin = "akka.persistence.snapshot-store.local"
-    akka.persistence.snapshot-store.local.dir = "target/snapshots-ClusterShardingLeavingSpec"
+    akka.persistence.snapshot-store.local.dir = "target/ClusterShardingLeavingSpec/snapshots"
     akka.cluster.sharding.state-store-mode = "$mode"
-    """))
+    akka.cluster.sharding.distributed-data.durable.lmdb {
+      dir = target/ClusterShardingLeavingSpec/sharding-ddata
+      map-size = 10 MiB
+    }
+    """).withFallback(MultiNodeClusterSpec.clusterConfig))
 }
 
 object PersistentClusterShardingLeavingSpecConfig extends ClusterShardingLeavingSpecConfig("persistence")
@@ -102,21 +104,16 @@ abstract class ClusterShardingLeavingSpec(config: ClusterShardingLeavingSpecConf
 
   override def initialParticipants = roles.size
 
-  val storageLocations = List(
-    "akka.persistence.journal.leveldb.dir",
-    "akka.persistence.journal.leveldb-shared.store.dir",
-    "akka.persistence.snapshot-store.local.dir").map(s ⇒ new File(system.settings.config.getString(s)))
+  val storageLocations = List(new File(system.settings.config.getString(
+    "akka.cluster.sharding.distributed-data.durable.lmdb.dir")).getParentFile)
 
-  override protected def atStartup() {
-    runOn(first) {
-      storageLocations.foreach(dir ⇒ if (dir.exists) FileUtils.deleteDirectory(dir))
-    }
+  override protected def atStartup(): Unit = {
+    storageLocations.foreach(dir ⇒ if (dir.exists) FileUtils.deleteQuietly(dir))
+    enterBarrier("startup")
   }
 
-  override protected def afterTermination() {
-    runOn(first) {
-      storageLocations.foreach(dir ⇒ if (dir.exists) FileUtils.deleteDirectory(dir))
-    }
+  override protected def afterTermination(): Unit = {
+    storageLocations.foreach(dir ⇒ if (dir.exists) FileUtils.deleteQuietly(dir))
   }
 
   val cluster = Cluster(system)
@@ -145,21 +142,25 @@ abstract class ClusterShardingLeavingSpec(config: ClusterShardingLeavingSpecConf
 
   lazy val region = ClusterSharding(system).shardRegion("Entity")
 
+  def isDdataMode: Boolean = mode == ClusterShardingSettings.StateStoreModeDData
+
   s"Cluster sharding ($mode) with leaving member" must {
 
-    "setup shared journal" in {
-      // start the Persistence extension
-      Persistence(system)
-      runOn(first) {
-        system.actorOf(Props[SharedLeveldbStore], "store")
+    if (!isDdataMode) {
+      "setup shared journal" in {
+        // start the Persistence extension
+        Persistence(system)
+        runOn(first) {
+          system.actorOf(Props[SharedLeveldbStore], "store")
+        }
+        enterBarrier("peristence-started")
+
+        system.actorSelection(node(first) / "user" / "store") ! Identify(None)
+        val sharedStore = expectMsgType[ActorIdentity](10.seconds).ref.get
+        SharedLeveldbJournal.setStore(sharedStore, system)
+
+        enterBarrier("after-1")
       }
-      enterBarrier("peristence-started")
-
-      system.actorSelection(node(first) / "user" / "store") ! Identify(None)
-      val sharedStore = expectMsgType[ActorIdentity](10.seconds).ref.get
-      SharedLeveldbJournal.setStore(sharedStore, system)
-
-      enterBarrier("after-1")
     }
 
     "join cluster" in within(20.seconds) {
@@ -184,7 +185,11 @@ abstract class ClusterShardingLeavingSpec(config: ClusterShardingLeavingSpecConf
       enterBarrier("after-3")
     }
 
-    "recover after leaving coordinator node" in within(30.seconds) {
+    "recover after leaving coordinator node" in {
+      system.actorSelection(node(first) / "user" / "shardLocations") ! GetLocations
+      val Locations(originalLocations) = expectMsgType[Locations]
+      val firstAddress = node(first).address
+
       runOn(third) {
         cluster.leave(node(first).address)
       }
@@ -196,18 +201,17 @@ abstract class ClusterShardingLeavingSpec(config: ClusterShardingLeavingSpecConf
       enterBarrier("stopped")
 
       runOn(second, third, fourth) {
-        system.actorSelection(node(first) / "user" / "shardLocations") ! GetLocations
-        val Locations(locations) = expectMsgType[Locations]
-        val firstAddress = node(first).address
-        awaitAssert {
-          val probe = TestProbe()
-          locations.foreach {
-            case (id, ref) ⇒
-              region.tell(Ping(id), probe.ref)
-              if (ref.path.address == firstAddress)
-                probe.expectMsgType[ActorRef](1.second) should not be (ref)
-              else
-                probe.expectMsg(1.second, ref) // should not move
+        within(15.seconds) {
+          awaitAssert {
+            val probe = TestProbe()
+            originalLocations.foreach {
+              case (id, ref) ⇒
+                region.tell(Ping(id), probe.ref)
+                if (ref.path.address == firstAddress)
+                  probe.expectMsgType[ActorRef](1.second) should not be (ref)
+                else
+                  probe.expectMsg(1.second, ref) // should not move
+            }
           }
         }
       }

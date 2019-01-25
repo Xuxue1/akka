@@ -1,33 +1,28 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.cluster.singleton
 
 import language.postfixOps
-import scala.collection.immutable
 import scala.concurrent.duration._
 import com.typesafe.config.ConfigFactory
 import akka.actor.Actor
 import akka.actor.ActorLogging
 import akka.actor.ActorRef
-import akka.actor.Address
 import akka.actor.Props
 import akka.actor.RootActorPath
 import akka.cluster.Cluster
 import akka.cluster.ClusterEvent._
-import akka.cluster.Member
 import akka.remote.testconductor.RoleName
 import akka.remote.testkit.MultiNodeConfig
 import akka.remote.testkit.MultiNodeSpec
 import akka.remote.testkit.STMultiNodeSpec
 import akka.testkit._
 import akka.testkit.TestEvent._
-import akka.actor.Terminated
 import akka.actor.Identify
 import akka.actor.ActorIdentity
 import akka.actor.ActorSelection
-import akka.cluster.MemberStatus
 
 object ClusterSingletonManagerSpec extends MultiNodeConfig {
   val controller = role("controller")
@@ -49,21 +44,25 @@ object ClusterSingletonManagerSpec extends MultiNodeConfig {
   nodeConfig(first, second, third, fourth, fifth, sixth)(
     ConfigFactory.parseString("akka.cluster.roles =[worker]"))
 
+  //#singleton-message-classes
   object PointToPointChannel {
+    case object UnregistrationOk
+    //#singleton-message-classes
     case object RegisterConsumer
     case object UnregisterConsumer
     case object RegistrationOk
     case object UnexpectedRegistration
-    case object UnregistrationOk
     case object UnexpectedUnregistration
     case object Reset
     case object ResetOk
+    //#singleton-message-classes
   }
+  //#singleton-message-classes
 
   /**
    * This channel is extremely strict with regards to
    * registration and unregistration of consumer to
-   * be able to detect misbehaviour (e.g. two active
+   * be able to detect misbehavior (e.g. two active
    * singleton instances).
    */
   class PointToPointChannel extends Actor with ActorLogging {
@@ -105,12 +104,14 @@ object ClusterSingletonManagerSpec extends MultiNodeConfig {
     }
   }
 
+  //#singleton-message-classes
   object Consumer {
     case object End
     case object GetCurrent
     case object Ping
     case object Pong
   }
+  //#singleton-message-classes
 
   /**
    * The Singleton actor
@@ -136,8 +137,8 @@ object ClusterSingletonManagerSpec extends MultiNodeConfig {
       case n: Int ⇒
         current = n
         delegateTo ! n
-      case x @ (RegistrationOk | UnexpectedRegistration) ⇒
-        delegateTo ! x
+      case message @ (RegistrationOk | UnexpectedRegistration) ⇒
+        delegateTo ! message
       case GetCurrent ⇒
         sender() ! current
       //#consumer-end
@@ -222,12 +223,26 @@ class ClusterSingletonManagerSpec extends MultiNodeSpec(ClusterSingletonManagerS
 
   def createSingletonProxy(): ActorRef = {
     //#create-singleton-proxy
-    system.actorOf(
+    val proxy = system.actorOf(
       ClusterSingletonProxy.props(
         singletonManagerPath = "/user/consumer",
         settings = ClusterSingletonProxySettings(system).withRole("worker")),
       name = "consumerProxy")
     //#create-singleton-proxy
+    proxy
+  }
+
+  def createSingletonProxyDc(): ActorRef = {
+    //#create-singleton-proxy-dc
+    val proxyDcB = system.actorOf(
+      ClusterSingletonProxy.props(
+        singletonManagerPath = "/user/consumer",
+        settings = ClusterSingletonProxySettings(system)
+          .withRole("worker")
+          .withDataCenter("B")),
+      name = "consumerProxyDcB")
+    //#create-singleton-proxy-dc
+    proxyDcB
   }
 
   def verifyProxyMsg(oldest: RoleName, proxyNode: RoleName, msg: Int): Unit = {
@@ -238,19 +253,27 @@ class ClusterSingletonManagerSpec extends MultiNodeSpec(ClusterSingletonManagerS
       // make sure that the proxy has received membership changes
       // and points to the current singleton
       val p = TestProbe()
-      within(5.seconds) {
+      val oldestAddress = node(oldest).address
+      within(10.seconds) {
         awaitAssert {
           system.actorSelection("/user/consumerProxy").tell(Ping, p.ref)
           p.expectMsg(1.second, Pong)
+          val replyFromAddress = p.lastSender.path.address
+          if (oldest == proxyNode)
+            replyFromAddress.hasLocalScope should ===(true)
+          else
+            replyFromAddress should ===(oldestAddress)
         }
       }
       // then send the real message
       system.actorSelection("/user/consumerProxy") ! msg
     }
 
+    enterBarrier(s"sent-msg-$msg")
+
     // expect a message on the oldest node
     runOn(oldest) {
-      expectMsg(5.seconds, msg)
+      expectMsg(msg)
     }
 
     enterBarrier("after-" + msg + "-proxy-verified")
@@ -306,7 +329,7 @@ class ClusterSingletonManagerSpec extends MultiNodeSpec(ClusterSingletonManagerS
       memberProbe.expectMsgClass(classOf[CurrentClusterState])
 
       runOn(controller) {
-        // watch that it is not terminated, which would indicate misbehaviour
+        // watch that it is not terminated, which would indicate misbehavior
         watch(system.actorOf(Props[PointToPointChannel], "queue"))
       }
       enterBarrier("queue-started")

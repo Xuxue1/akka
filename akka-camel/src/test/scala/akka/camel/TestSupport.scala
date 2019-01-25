@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.camel
@@ -21,7 +21,7 @@ private[camel] object TestSupport {
   def start(actor: ⇒ Actor, name: String)(implicit system: ActorSystem, timeout: Timeout): ActorRef =
     Await.result(CamelExtension(system).activationFutureFor(system.actorOf(Props(actor), name))(timeout, system.dispatcher), timeout.duration)
 
-  def stop(actorRef: ActorRef)(implicit system: ActorSystem, timeout: Timeout) {
+  def stop(actorRef: ActorRef)(implicit system: ActorSystem, timeout: Timeout): Unit = {
     system.stop(actorRef)
     Await.result(CamelExtension(system).deactivationFutureFor(actorRef)(timeout, system.dispatcher), timeout.duration)
   }
@@ -51,7 +51,7 @@ private[camel] object TestSupport {
     implicit lazy val system = ActorSystem("SharedCamelSystem", AkkaSpec.testConf)
     implicit lazy val camel = CamelExtension(system)
 
-    abstract override protected def afterAll() {
+    abstract override protected def afterAll(): Unit = {
       super.afterAll()
       TestKit.shutdownActorSystem(system)
     }
@@ -61,13 +61,13 @@ private[camel] object TestSupport {
     implicit var system: ActorSystem = _
     implicit var camel: Camel = _
 
-    override protected def beforeEach() {
+    override protected def beforeEach(): Unit = {
       super.beforeEach()
       system = ActorSystem("NonSharedCamelSystem", AkkaSpec.testConf)
       camel = CamelExtension(system)
     }
 
-    override protected def afterEach() {
+    override protected def afterEach(): Unit = {
       TestKit.shutdownActorSystem(system)
       super.afterEach()
     }

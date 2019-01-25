@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.remote.routing
 
 import java.util.concurrent.atomic.AtomicInteger
@@ -68,9 +69,9 @@ final case class RemoteRouterConfig(local: Pool, nodes: Iterable[Address]) exten
   override def resizer: Option[Resizer] = local.resizer
 
   override def withFallback(other: RouterConfig): RouterConfig = other match {
-    case RemoteRouterConfig(local: RemoteRouterConfig, nodes) ⇒ throw new IllegalStateException(
+    case RemoteRouterConfig(_: RemoteRouterConfig, _) ⇒ throw new IllegalStateException(
       "RemoteRouterConfig is not allowed to wrap a RemoteRouterConfig")
-    case RemoteRouterConfig(local: Pool, nodes) ⇒
+    case RemoteRouterConfig(local: Pool, _) ⇒
       copy(local = this.local.withFallback(local).asInstanceOf[Pool])
     case _ ⇒ copy(local = this.local.withFallback(other).asInstanceOf[Pool])
   }

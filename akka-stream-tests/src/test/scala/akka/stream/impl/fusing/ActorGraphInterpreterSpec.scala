@@ -1,19 +1,23 @@
-/**
- * Copyright (C) 2015-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2015-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.impl.fusing
 
 import java.util.concurrent.CountDownLatch
 
+import akka.Done
 import akka.stream._
 import akka.stream.impl.ReactiveStreamsCompliance.SpecViolation
+import akka.stream.impl.fusing.GraphStages.SimpleLinearGraphStage
 import akka.stream.scaladsl._
 import akka.stream.stage.{ GraphStage, GraphStageLogic, InHandler, OutHandler }
 import akka.stream.testkit.Utils._
+import akka.stream.testkit.scaladsl.StreamTestKit._
 import akka.stream.testkit.{ StreamSpec, TestPublisher, TestSubscriber }
-import akka.testkit.EventFilter
+import akka.testkit.{ EventFilter, TestLatch }
 
-import scala.concurrent.Await
+import scala.concurrent.{ Await, Promise }
 import scala.concurrent.duration._
 import org.reactivestreams.{ Publisher, Subscriber, Subscription }
 
@@ -256,7 +260,6 @@ class ActorGraphInterpreterSpec extends StreamSpec {
       EventFilter[IllegalArgumentException](pattern = "Error in stage.*", occurrences = 1).intercept {
         Await.result(Source.fromGraph(failyStage).runWith(Sink.ignore), 3.seconds)
       }
-
     }
 
     "be able to properly handle case where a stage fails before subscription happens" in assertAllStagesStopped {
@@ -390,5 +393,62 @@ class ActorGraphInterpreterSpec extends StreamSpec {
       upstream.expectCancellation()
     }
 
+    "trigger postStop in all stages when abruptly terminated (and no upstream boundaries)" in {
+      val mat = ActorMaterializer()
+      val gotStop = TestLatch(1)
+
+      object PostStopSnitchFlow extends SimpleLinearGraphStage[String] {
+        override def createLogic(inheritedAttributes: Attributes): GraphStageLogic = new GraphStageLogic(shape) {
+          setHandler(in, new InHandler {
+            override def onPush(): Unit = push(out, grab(in))
+          })
+          setHandler(out, new OutHandler {
+            override def onPull(): Unit = pull(in)
+          })
+
+          override def postStop(): Unit = {
+            gotStop.countDown()
+          }
+        }
+      }
+
+      val downstream = TestSubscriber.probe[String]()
+
+      Source.repeat("whatever")
+        .via(PostStopSnitchFlow)
+        .to(Sink.fromSubscriber(downstream))
+        .run()(mat)
+
+      downstream.requestNext()
+
+      mat.shutdown()
+      Await.ready(gotStop, remainingOrDefault)
+
+      val propagatedError = downstream.expectError()
+      propagatedError shouldBe an[AbruptTerminationException]
+    }
+
+    // reproduces #24719
+    "not allow a second subscriber" in {
+      val done = Promise[Done]()
+      Source.single(Source.fromPublisher(new Publisher[Int] {
+        def subscribe(s: Subscriber[_ >: Int]): Unit = {
+          s.onSubscribe(new Subscription {
+            def cancel(): Unit = ()
+            def request(n: Long): Unit = ()
+          })
+          // reactive streams 2.5 - must cancel if called with onSubscribe when already have one running
+          s.onSubscribe(new Subscription {
+            def cancel(): Unit =
+              done.trySuccess(Done)
+            def request(n: Long): Unit =
+              done.tryFailure(new IllegalStateException("request should not have been invoked"))
+          })
+        }
+      })).flatMapConcat(identity).runWith(Sink.ignore)
+      done.future.futureValue // would throw on failure
+    }
+
   }
 }
+

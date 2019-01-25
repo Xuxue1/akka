@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.actor
 import scala.annotation.{ switch, tailrec }
 import scala.collection.immutable
@@ -54,12 +55,9 @@ object ActorPath {
    * Parse string as actor path; throws java.net.MalformedURLException if unable to do so.
    */
   def fromString(s: String): ActorPath = s match {
-    case ActorPathExtractor(addr, elems) ⇒ RootActorPath(addr) / elems
-    case _                               ⇒ throw new MalformedURLException("cannot parse as ActorPath: " + s)
+    case ActorPathExtractor(address, elems) ⇒ RootActorPath(address) / elems
+    case _                                  ⇒ throw new MalformedURLException("cannot parse as ActorPath: " + s)
   }
-
-  @deprecated("Use `isValidPathElement` instead", since = "2.3.8")
-  val ElementRegex = """(?:[-\w:@&=+,.!~*'_;]|%\p{XDigit}{2})(?:[-\w:@&=+,.!~*'$_;]|%\p{XDigit}{2})*""".r
 
   private final val ValidSymbols = """-_.*$+:@&=,!~';"""
 
@@ -88,9 +86,9 @@ object ActorPath {
       case ValidPathCode ⇒
       // valid
       case EmptyPathCode ⇒
-        throw new InvalidActorNameException(s"Actor path element must not be empty $fullPathMsg")
+        throw InvalidActorNameException(s"Actor path element must not be empty $fullPathMsg")
       case invalidAt ⇒
-        throw new InvalidActorNameException(
+        throw InvalidActorNameException(
           s"""Invalid actor path element [$element]$fullPathMsg, illegal character [${element(invalidAt)}] at position: $invalidAt. """ +
             """Actor paths MUST: """ +
             """not start with `$`, """ +
@@ -179,7 +177,7 @@ sealed trait ActorPath extends Comparable[ActorPath] with Serializable {
   /**
    * Recursively create a descendant’s path by appending all child names.
    */
-  def /(child: Iterable[String]): ActorPath = (this /: child)((path, elem) ⇒ if (elem.isEmpty) path else path / elem)
+  def /(child: Iterable[String]): ActorPath = child.foldLeft(this)((path, elem) ⇒ if (elem.isEmpty) path else path / elem)
 
   /**
    * Java API: Recursively create a descendant’s path by appending all child names.
@@ -283,7 +281,7 @@ final case class RootActorPath(address: Address, name: String = "/") extends Act
 
   override def compareTo(other: ActorPath): Int = other match {
     case r: RootActorPath  ⇒ toString compareTo r.toString // FIXME make this cheaper by comparing address and name in isolation
-    case c: ChildActorPath ⇒ 1
+    case _: ChildActorPath ⇒ 1
   }
 
   /**
@@ -317,7 +315,7 @@ final class ChildActorPath private[akka] (val parent: ActorPath, val name: Strin
   override def elements: immutable.Iterable[String] = {
     @tailrec
     def rec(p: ActorPath, acc: List[String]): immutable.Iterable[String] = p match {
-      case r: RootActorPath ⇒ acc
+      case _: RootActorPath ⇒ acc
       case _                ⇒ rec(p.parent, p.name :: acc)
     }
     rec(this, Nil)
@@ -370,10 +368,10 @@ final class ChildActorPath private[akka] (val parent: ActorPath, val name: Strin
     appendUidFragment(sb).toString
   }
 
-  private def addressStringLengthDiff(addr: Address): Int = {
+  private def addressStringLengthDiff(address: Address): Int = {
     val r = root
     if (r.address.host.isDefined) 0
-    else (addr.toString.length - r.address.toString.length)
+    else (address.toString.length - r.address.toString.length)
   }
 
   /**

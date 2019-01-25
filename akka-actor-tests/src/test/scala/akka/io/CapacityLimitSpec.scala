@@ -1,11 +1,11 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.io
 
 import akka.testkit.{ TestProbe, AkkaSpec }
-import akka.testkit.SocketUtil._
+import akka.testkit.SocketUtil.temporaryServerAddresses
 import Tcp._
 
 class CapacityLimitSpec extends AkkaSpec("""
@@ -17,7 +17,7 @@ class CapacityLimitSpec extends AkkaSpec("""
 
   "The TCP transport implementation" should {
 
-    "reply with CommandFailed to a Bind or Connect command if max-channels capacity has been reached" in new TestSetup {
+    "reply with CommandFailed to a Bind or Connect command if max-channels capacity has been reached" in new TestSetup(runClientInExtraSystem = false) {
       establishNewClientConnection()
 
       // we now have three channels registered: a listener, a server connection and a client connection

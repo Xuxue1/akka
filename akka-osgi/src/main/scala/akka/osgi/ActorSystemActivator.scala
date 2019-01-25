@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.osgi
 
 import akka.actor.ActorSystem
@@ -50,9 +51,9 @@ abstract class ActorSystemActivator extends BundleActivator {
    * @param context  the BundleContext
    * @param  system  the ActorSystem to be advertised
    */
-  def addLogServiceListener(context: BundleContext, system: ActorSystem) {
+  def addLogServiceListener(context: BundleContext, system: ActorSystem): Unit = {
     val logServiceListner = new ServiceListener {
-      def serviceChanged(event: ServiceEvent) {
+      def serviceChanged(event: ServiceEvent): Unit = {
         event.getType match {
           case ServiceEvent.REGISTERED ⇒
             system.eventStream.publish(serviceForReference[LogService](context, event.getServiceReference))

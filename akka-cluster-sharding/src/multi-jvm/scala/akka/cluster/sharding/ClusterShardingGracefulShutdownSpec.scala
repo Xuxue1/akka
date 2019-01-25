@@ -1,13 +1,14 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.cluster.sharding
 
 import scala.concurrent.duration._
 import java.io.File
 
 import akka.actor._
-import akka.cluster.Cluster
+import akka.cluster.{ Cluster, MultiNodeClusterSpec }
 import akka.cluster.sharding.ShardRegion.GracefulShutdown
 import akka.persistence.Persistence
 import akka.persistence.journal.leveldb.{ SharedLeveldbJournal, SharedLeveldbStore }
@@ -38,32 +39,6 @@ object ClusterShardingGracefulShutdownSpec {
     case id: Int ⇒ id.toString
   }
 
-  //#graceful-shutdown
-  class IllustrateGracefulShutdown extends Actor {
-    val system = context.system
-    val cluster = Cluster(system)
-    val region = ClusterSharding(system).shardRegion("Entity")
-
-    def receive = {
-      case "leave" ⇒
-        context.watch(region)
-        region ! ShardRegion.GracefulShutdown
-
-      case Terminated(`region`) ⇒
-        cluster.registerOnMemberRemoved(self ! "member-removed")
-        cluster.leave(cluster.selfAddress)
-
-      case "member-removed" ⇒
-        // Let singletons hand over gracefully before stopping the system
-        import context.dispatcher
-        system.scheduler.scheduleOnce(10.seconds, self, "stop-system")
-
-      case "stop-system" ⇒
-        system.terminate()
-    }
-  }
-  //#graceful-shutdown
-
 }
 
 abstract class ClusterShardingGracefulShutdownSpecConfig(val mode: String) extends MultiNodeConfig {
@@ -79,13 +54,17 @@ abstract class ClusterShardingGracefulShutdownSpecConfig(val mode: String) exten
       timeout = 5s
       store {
         native = off
-        dir = "target/journal-ClusterShardingGracefulShutdownSpec"
+        dir = "target/ClusterShardingGracefulShutdownSpec/journal"
       }
     }
     akka.persistence.snapshot-store.plugin = "akka.persistence.snapshot-store.local"
-    akka.persistence.snapshot-store.local.dir = "target/snapshots-ClusterShardingGracefulShutdownSpec"
+    akka.persistence.snapshot-store.local.dir = "target/ClusterShardingGracefulShutdownSpec/snapshots"
     akka.cluster.sharding.state-store-mode = "$mode"
-    """))
+    akka.cluster.sharding.distributed-data.durable.lmdb {
+      dir = target/ClusterShardingGracefulShutdownSpec/sharding-ddata
+      map-size = 10 MiB
+    }
+    """).withFallback(MultiNodeClusterSpec.clusterConfig))
 }
 
 object PersistentClusterShardingGracefulShutdownSpecConfig extends ClusterShardingGracefulShutdownSpecConfig("persistence")
@@ -106,21 +85,16 @@ abstract class ClusterShardingGracefulShutdownSpec(config: ClusterShardingGracef
 
   override def initialParticipants = roles.size
 
-  val storageLocations = List(
-    "akka.persistence.journal.leveldb.dir",
-    "akka.persistence.journal.leveldb-shared.store.dir",
-    "akka.persistence.snapshot-store.local.dir").map(s ⇒ new File(system.settings.config.getString(s)))
+  val storageLocations = List(new File(system.settings.config.getString(
+    "akka.cluster.sharding.distributed-data.durable.lmdb.dir")).getParentFile)
 
-  override protected def atStartup() {
-    runOn(first) {
-      storageLocations.foreach(dir ⇒ if (dir.exists) FileUtils.deleteDirectory(dir))
-    }
+  override protected def atStartup(): Unit = {
+    storageLocations.foreach(dir ⇒ if (dir.exists) FileUtils.deleteQuietly(dir))
+    enterBarrier("startup")
   }
 
-  override protected def afterTermination() {
-    runOn(first) {
-      storageLocations.foreach(dir ⇒ if (dir.exists) FileUtils.deleteDirectory(dir))
-    }
+  override protected def afterTermination(): Unit = {
+    storageLocations.foreach(dir ⇒ if (dir.exists) FileUtils.deleteQuietly(dir))
   }
 
   def join(from: RoleName, to: RoleName): Unit = {
@@ -145,23 +119,27 @@ abstract class ClusterShardingGracefulShutdownSpec(config: ClusterShardingGracef
 
   lazy val region = ClusterSharding(system).shardRegion("Entity")
 
+  def isDdataMode: Boolean = mode == ClusterShardingSettings.StateStoreModeDData
+
   s"Cluster sharding ($mode)" must {
 
-    "setup shared journal" in {
-      // start the Persistence extension
-      Persistence(system)
-      runOn(first) {
-        system.actorOf(Props[SharedLeveldbStore], "store")
-      }
-      enterBarrier("peristence-started")
+    if (!isDdataMode) {
+      "setup shared journal" in {
+        // start the Persistence extension
+        Persistence(system)
+        runOn(first) {
+          system.actorOf(Props[SharedLeveldbStore], "store")
+        }
+        enterBarrier("peristence-started")
 
-      runOn(first, second) {
-        system.actorSelection(node(first) / "user" / "store") ! Identify(None)
-        val sharedStore = expectMsgType[ActorIdentity](10.seconds).ref.get
-        SharedLeveldbJournal.setStore(sharedStore, system)
-      }
+        runOn(first, second) {
+          system.actorSelection(node(first) / "user" / "store") ! Identify(None)
+          val sharedStore = expectMsgType[ActorIdentity](10.seconds).ref.get
+          SharedLeveldbJournal.setStore(sharedStore, system)
+        }
 
-      enterBarrier("after-1")
+        enterBarrier("after-1")
+      }
     }
 
     "start some shards in both regions" in within(30.seconds) {

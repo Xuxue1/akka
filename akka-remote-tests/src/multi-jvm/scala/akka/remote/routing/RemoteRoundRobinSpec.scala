@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.remote.routing
 
 import akka.actor.{ Actor, ActorRef, Address, PoisonPill, Props }
@@ -26,7 +27,7 @@ class RemoteRoundRobinConfig(artery: Boolean) extends MultiNodeConfig {
   commonConfig(debugConfig(on = false).withFallback(
     ConfigFactory.parseString(s"""
       akka.remote.artery.enabled = $artery
-      """)).withFallback(RemotingMultiNodeSpec.arteryFlightRecordingConf))
+      """)).withFallback(RemotingMultiNodeSpec.commonConfig))
 
   deployOnAll("""
       /service-hello {
@@ -100,7 +101,9 @@ class RemoteRoundRobinSpec(multiNodeConfig: RemoteRoundRobinConfig) extends Remo
         }
 
         val replies: Map[Address, Int] = (receiveWhile(5 seconds, messages = connectionCount * iterationCount) {
-          case ref: ActorRef ⇒ ref.path.address
+          case ref: ActorRef ⇒
+            info(s"reply from $ref")
+            ref.path.address
         }).foldLeft(Map(node(first).address → 0, node(second).address → 0, node(third).address → 0)) {
           case (replyMap, address) ⇒ replyMap + (address → (replyMap(address) + 1))
         }

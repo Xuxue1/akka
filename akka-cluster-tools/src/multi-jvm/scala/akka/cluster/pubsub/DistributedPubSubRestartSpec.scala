@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.cluster.pubsub
 
 import language.postfixOps
@@ -8,25 +9,19 @@ import scala.concurrent.duration._
 import com.typesafe.config.ConfigFactory
 import akka.actor.Actor
 import akka.actor.ActorRef
-import akka.actor.PoisonPill
 import akka.actor.Props
 import akka.cluster.Cluster
-import akka.cluster.ClusterEvent._
 import akka.remote.testconductor.RoleName
 import akka.remote.testkit.MultiNodeConfig
 import akka.remote.testkit.MultiNodeSpec
 import akka.remote.testkit.STMultiNodeSpec
 import akka.testkit._
-import akka.actor.ActorLogging
-import akka.cluster.pubsub.DistributedPubSubMediator.Internal.Status
-import akka.cluster.pubsub.DistributedPubSubMediator.Internal.Delta
 import akka.actor.ActorSystem
 
 import scala.concurrent.Await
 import akka.actor.Identify
 import akka.actor.RootActorPath
 import akka.actor.ActorIdentity
-import akka.remote.RARP
 
 object DistributedPubSubRestartSpec extends MultiNodeConfig {
   val first = role("first")
@@ -122,8 +117,9 @@ class DistributedPubSubRestartSpec extends MultiNodeSpec(DistributedPubSubRestar
 
         within(20.seconds) {
           awaitAssert {
-            system.actorSelection(RootActorPath(thirdAddress) / "user" / "shutdown") ! Identify(None)
-            expectMsgType[ActorIdentity](1.second).ref.get
+            val p = TestProbe()
+            system.actorSelection(RootActorPath(thirdAddress) / "user" / "shutdown").tell(Identify(None), p.ref)
+            p.expectMsgType[ActorIdentity](1.second).ref.get
           }
         }
 
@@ -141,9 +137,10 @@ class DistributedPubSubRestartSpec extends MultiNodeSpec(DistributedPubSubRestar
         val newSystem = {
           val port = Cluster(system).selfAddress.port.get
           val config = ConfigFactory.parseString(
-            if (RARP(system).provider.remoteSettings.Artery.Enabled) s"akka.remote.artery.canonical.port=$port"
-            else s"akka.remote.netty.tcp.port=$port"
-          ).withFallback(system.settings.config)
+            s"""
+              akka.remote.artery.canonical.port=$port
+              akka.remote.netty.tcp.port=$port
+              """).withFallback(system.settings.config)
 
           ActorSystem(system.name, config)
         }
@@ -162,7 +159,7 @@ class DistributedPubSubRestartSpec extends MultiNodeSpec(DistributedPubSubRestar
           probe.expectMsg(0L)
 
           newSystem.actorOf(Props[Shutdown], "shutdown")
-          Await.ready(newSystem.whenTerminated, 10.seconds)
+          Await.ready(newSystem.whenTerminated, 20.seconds)
         } finally newSystem.terminate()
       }
 

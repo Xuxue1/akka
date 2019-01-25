@@ -1,13 +1,14 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.extra
 
 import akka.stream.{ ActorMaterializerSettings, ActorMaterializer }
 import akka.stream.scaladsl.{ Source, Flow }
 import akka.stream.scaladsl.Sink
 import akka.stream.testkit._
-import akka.stream.testkit.Utils._
+import akka.stream.testkit.scaladsl.StreamTestKit._
 import akka.testkit.TestProbe
 import org.reactivestreams.{ Publisher, Subscriber }
 

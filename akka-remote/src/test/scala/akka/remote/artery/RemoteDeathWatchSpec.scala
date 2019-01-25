@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.remote.artery
 
 import akka.testkit._
@@ -9,13 +10,11 @@ import com.typesafe.config.ConfigFactory
 import akka.actor.RootActorPath
 import scala.concurrent.duration._
 import akka.testkit.SocketUtil
-import akka.event.Logging.Warning
 import akka.remote.QuarantinedEvent
 import akka.remote.RARP
-import akka.remote.RemoteActorRef
 
 object RemoteDeathWatchSpec {
-  val otherPort = SocketUtil.temporaryServerAddress("localhost", udp = true).getPort
+  val otherPort = ArteryMultiNodeSpec.freePort(ConfigFactory.load())
 
   val config = ConfigFactory.parseString(s"""
     akka {
@@ -25,26 +24,26 @@ object RemoteDeathWatchSpec {
                 /watchers.remote = "akka://other@localhost:$otherPort"
             }
         }
-        remote.watch-failure-detector.acceptable-heartbeat-pause = 3s
-        remote.artery.enabled = on
-        remote.artery.canonical.hostname = localhost
-        remote.artery.canonical.port = 0
+        test.filter-leeway = 10s
+        remote.watch-failure-detector.acceptable-heartbeat-pause = 2s
+
+        # reduce handshake timeout for quicker test of unknownhost, but
+        # must still be longer than failure detection
+        remote.artery.advanced {
+          handshake-timeout = 10 s
+          image-liveness-timeout = 9 seconds
+        }
     }
-    """)
+    """).withFallback(ArterySpecSupport.defaultConfig)
 }
 
-class RemoteDeathWatchSpec extends AkkaSpec(RemoteDeathWatchSpec.config) with ImplicitSender with DefaultTimeout with DeathWatchSpec {
+class RemoteDeathWatchSpec extends ArteryMultiNodeSpec(RemoteDeathWatchSpec.config) with ImplicitSender with DefaultTimeout with DeathWatchSpec {
   import RemoteDeathWatchSpec._
 
   system.eventStream.publish(TestEvent.Mute(
     EventFilter[io.aeron.exceptions.RegistrationException]()))
 
-  val other = ActorSystem("other", ConfigFactory.parseString(s"akka.remote.artery.canonical.port=$otherPort")
-    .withFallback(system.settings.config))
-
-  override def afterTermination() {
-    shutdown(other)
-  }
+  val other = newRemoteSystem(name = Some("other"), extraConfig = Some(s"akka.remote.artery.canonical.port=$otherPort"))
 
   override def expectedTestDuration: FiniteDuration = 120.seconds
 
@@ -53,7 +52,7 @@ class RemoteDeathWatchSpec extends AkkaSpec(RemoteDeathWatchSpec.config) with Im
     system.eventStream.subscribe(probe.ref, classOf[QuarantinedEvent])
     val rarp = RARP(system).provider
     // pick an unused port
-    val port = SocketUtil.temporaryServerAddress("localhost", udp = true).getPort
+    val port = SocketUtil.temporaryLocalPort(udp = true)
     // simulate de-serialized ActorRef
     val ref = rarp.resolveActorRef(s"akka://OtherSystem@localhost:$port/user/foo/bar#1752527294")
 
@@ -63,6 +62,7 @@ class RemoteDeathWatchSpec extends AkkaSpec(RemoteDeathWatchSpec.config) with Im
 
         system.actorOf(Props(new Actor {
           context.watch(ref)
+
           def receive = {
             case Terminated(r) ⇒ testActor ! r
           }
@@ -86,6 +86,10 @@ class RemoteDeathWatchSpec extends AkkaSpec(RemoteDeathWatchSpec.config) with Im
   }
 
   "receive ActorIdentity(None) when identified node is unknown host" in {
+    // TODO There is a timing difference between Aeron and TCP. AeronSink will throw exception
+    // immediately in constructor from aeron.addPublication when UnknownHostException. That will trigger
+    // this immediately. With TCP it will trigger after handshake timeout. Can we see the UnknownHostException
+    // reason somehow and fail the stream immediately for that case?
     val path = RootActorPath(Address("akka", system.name, "unknownhost2", 2552)) / "user" / "subject"
     system.actorSelection(path) ! Identify(path)
     expectMsg(60.seconds, ActorIdentity(path, None))

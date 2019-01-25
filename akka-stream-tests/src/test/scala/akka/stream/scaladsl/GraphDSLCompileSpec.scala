@@ -1,11 +1,11 @@
-/**
- * Copyright (C) 2014-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2014-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.scaladsl
 
-import akka.NotUsed
 import akka.stream.impl.fusing.GraphStages
-import akka.stream.{ ActorMaterializer, ClosedShape, FlowShape, OverflowStrategy }
+import akka.stream._
 import akka.stream.testkit._
 import akka.stream.stage._
 
@@ -19,21 +19,26 @@ class GraphDSLCompileSpec extends StreamSpec {
 
   implicit val materializer = ActorMaterializer()
 
-  def op[In, Out]: () ⇒ PushStage[In, Out] = { () ⇒
-    new PushStage[In, Out] {
-      override def onPush(elem: In, ctx: Context[Out]): SyncDirective =
-        ctx.push(elem.asInstanceOf[Out])
+  def op[In, Out] = new GraphStage[FlowShape[In, Out]] {
+    val in = Inlet[In]("op.in")
+    val out = Outlet[Out]("op.out")
+    override val shape = FlowShape[In, Out](in, out)
+    override def createLogic(inheritedAttributes: Attributes) = new GraphStageLogic(shape) with InHandler with OutHandler {
+      override def onPush() = push(out, grab(in).asInstanceOf[Out])
+      override def onPull(): Unit = pull(in)
+      setHandlers(in, out, this)
     }
+
   }
 
   val apples = () ⇒ Iterator.continually(new Apple)
 
-  val f1 = Flow[String].transform(op[String, String]).named("f1")
-  val f2 = Flow[String].transform(op[String, String]).named("f2")
-  val f3 = Flow[String].transform(op[String, String]).named("f3")
-  val f4 = Flow[String].transform(op[String, String]).named("f4")
-  val f5 = Flow[String].transform(op[String, String]).named("f5")
-  val f6 = Flow[String].transform(op[String, String]).named("f6")
+  val f1 = Flow[String].via(op[String, String]).named("f1")
+  val f2 = Flow[String].via(op[String, String]).named("f2")
+  val f3 = Flow[String].via(op[String, String]).named("f3")
+  val f4 = Flow[String].via(op[String, String]).named("f4")
+  val f5 = Flow[String].via(op[String, String]).named("f5")
+  val f6 = Flow[String].via(op[String, String]).named("f6")
 
   val in1 = Source(List("a", "b", "c"))
   val in2 = Source(List("d", "e", "f"))
@@ -169,7 +174,7 @@ class GraphDSLCompileSpec extends StreamSpec {
         val out2 = Sink.asPublisher[String](false)
         val out9 = Sink.asPublisher[String](false)
         val out10 = Sink.asPublisher[String](false)
-        def f(s: String) = Flow[String].transform(op[String, String]).named(s)
+        def f(s: String) = Flow[String].via(op[String, String]).named(s)
         import GraphDSL.Implicits._
 
         in7 ~> f("a") ~> b7 ~> f("b") ~> m11 ~> f("c") ~> b11 ~> f("d") ~> out2
@@ -209,22 +214,36 @@ class GraphDSLCompileSpec extends StreamSpec {
       }).run()
     }
 
-    "distinguish between input and output ports" in {
-      intercept[IllegalArgumentException] {
-        RunnableGraph.fromGraph(GraphDSL.create() { implicit b ⇒
-          val zip = b.add(Zip[Int, String]())
-          val unzip = b.add(Unzip[Int, String]())
-          val wrongOut = Sink.asPublisher[(Int, Int)](false)
-          val whatever = Sink.asPublisher[Any](false)
-          "Flow(List(1, 2, 3)) ~> zip.left ~> wrongOut" shouldNot compile
-          """Flow(List("a", "b", "c")) ~> zip.left""" shouldNot compile
-          """Flow(List("a", "b", "c")) ~> zip.out""" shouldNot compile
-          "zip.left ~> zip.right" shouldNot compile
-          "Flow(List(1, 2, 3)) ~> zip.left ~> wrongOut" shouldNot compile
-          """Flow(List(1 -> "a", 2 -> "b", 3 -> "c")) ~> unzip.in ~> whatever""" shouldNot compile
+    "throw an error if some ports are not connected" in {
+      intercept[IllegalStateException] {
+        GraphDSL.create() { implicit b ⇒
+          val s = b.add(Source.empty[Int])
+          val op = b.add(Flow[Int].map(_ + 1))
+          val sink = b.add(Sink.foreach[Int](println))
+
+          op ~> sink.in
+
           ClosedShape
-        })
-      }.getMessage should include("must correspond to")
+        }
+      }.getMessage should be("Illegal GraphDSL usage. " +
+        "Inlets [Map.in] were not returned in the resulting shape and not connected. " +
+        "Outlets [EmptySource.out] were not returned in the resulting shape and not connected.")
+    }
+
+    "throw an error if a connected port is returned in the shape" in {
+      intercept[IllegalStateException] {
+        GraphDSL.create() { implicit b ⇒
+          val s = b.add(Source.empty[Int])
+          val op = b.add(Flow[Int].map(_ + 1))
+          val sink = b.add(Sink.foreach[Int](println))
+
+          s ~> op ~> sink.in
+
+          op
+        }
+      }.getMessage should be("Illegal GraphDSL usage. " +
+        "Inlets [Map.in] were returned in the resulting shape but were already connected. " +
+        "Outlets [Map.out] were returned in the resulting shape but were already connected.")
     }
 
     "build with variance" in {
@@ -345,14 +364,13 @@ class GraphDSLCompileSpec extends StreamSpec {
     "suitably override attribute handling methods" in {
       import akka.stream.Attributes._
       val ga = GraphDSL.create() { implicit b ⇒
-        import GraphDSL.Implicits._
-        val id = b.add(GraphStages.Identity)
+        val id = b.add(GraphStages.identity[Any])
 
         FlowShape(id.in, id.out)
       }.async.addAttributes(none).named("useless")
 
-      ga.module.attributes.getFirst[Name] shouldEqual Some(Name("useless"))
-      ga.module.attributes.getFirst[AsyncBoundary.type] shouldEqual (Some(AsyncBoundary))
+      ga.traversalBuilder.attributes.getFirst[Name] shouldEqual Some(Name("useless"))
+      ga.traversalBuilder.attributes.getFirst[AsyncBoundary.type] shouldEqual (Some(AsyncBoundary))
     }
   }
 }

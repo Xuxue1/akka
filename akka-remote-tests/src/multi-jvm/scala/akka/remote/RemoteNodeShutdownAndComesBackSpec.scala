@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.remote
 
 import language.postfixOps
@@ -10,8 +11,6 @@ import akka.actor._
 import akka.remote.testconductor.RoleName
 import akka.remote.transport.ThrottlerTransportAdapter.{ ForceDisassociate, Direction }
 import akka.remote.testkit.MultiNodeConfig
-import akka.remote.testkit.MultiNodeSpec
-import akka.remote.testkit.STMultiNodeSpec
 import akka.testkit._
 import akka.actor.ActorIdentity
 import akka.remote.testconductor.RoleName
@@ -123,7 +122,7 @@ abstract class RemoteNodeShutdownAndComesBackSpec
       }
 
       runOn(second) {
-        val addr = system.asInstanceOf[ExtendedActorSystem].provider.getDefaultAddress
+        val address = system.asInstanceOf[ExtendedActorSystem].provider.getDefaultAddress
         system.actorOf(Props[Subject], "subject")
         system.actorOf(Props[Subject], "sysmsgBarrier")
         val path = node(first)
@@ -134,8 +133,8 @@ abstract class RemoteNodeShutdownAndComesBackSpec
         Await.ready(system.whenTerminated, 30.seconds)
 
         val freshSystem = ActorSystem(system.name, ConfigFactory.parseString(s"""
-          akka.remote.netty.tcp.port = ${addr.port.get}
-          akka.remote.artery.canonical.port = ${addr.port.get}
+          akka.remote.netty.tcp.port = ${address.port.get}
+          akka.remote.artery.canonical.port = ${address.port.get}
           """).withFallback(system.settings.config))
         freshSystem.actorOf(Props[Subject], "subject")
 

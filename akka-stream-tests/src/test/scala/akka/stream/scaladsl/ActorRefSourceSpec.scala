@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2015-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2015-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.scaladsl
 
 import scala.concurrent.duration._
@@ -8,8 +9,10 @@ import akka.stream.{ Attributes, ActorMaterializer, OverflowStrategy }
 import akka.stream.testkit._
 import akka.stream.testkit.scaladsl._
 import akka.stream.testkit.Utils._
+import akka.stream.testkit.scaladsl.StreamTestKit._
 import akka.actor.PoisonPill
 import akka.actor.Status
+import akka.Done
 
 class ActorRefSourceSpec extends StreamSpec {
   implicit val materializer = ActorMaterializer()
@@ -77,14 +80,6 @@ class ActorRefSourceSpec extends StreamSpec {
       expectTerminated(ref)
     }
 
-    "complete the stream immediatly when receiving PoisonPill" in assertAllStagesStopped {
-      val s = TestSubscriber.manualProbe[Int]()
-      val ref = Source.actorRef(10, OverflowStrategy.fail).to(Sink.fromSubscriber(s)).run()
-      val sub = s.expectSubscription
-      ref ! PoisonPill
-      s.expectComplete()
-    }
-
     "signal buffered elements and complete the stream after receiving Status.Success" in assertAllStagesStopped {
       val s = TestSubscriber.manualProbe[Int]()
       val ref = Source.actorRef(3, OverflowStrategy.fail).to(Sink.fromSubscriber(s)).run()
@@ -93,6 +88,19 @@ class ActorRefSourceSpec extends StreamSpec {
       ref ! 2
       ref ! 3
       ref ! Status.Success("ok")
+      sub.request(10)
+      s.expectNext(1, 2, 3)
+      s.expectComplete()
+    }
+
+    "signal buffered elements and complete the stream after receiving a Status.Success companion" in assertAllStagesStopped {
+      val s = TestSubscriber.manualProbe[Int]()
+      val ref = Source.actorRef(3, OverflowStrategy.fail).to(Sink.fromSubscriber(s)).run()
+      val sub = s.expectSubscription
+      ref ! 1
+      ref ! 2
+      ref ! 3
+      ref ! Status.Success
       sub.request(10)
       s.expectNext(1, 2, 3)
       s.expectComplete()
@@ -114,18 +122,12 @@ class ActorRefSourceSpec extends StreamSpec {
       s.expectComplete()
     }
 
-    "after receiving Status.Success, allow for earlier completion with PoisonPill" in assertAllStagesStopped {
-      val s = TestSubscriber.manualProbe[Int]()
-      val ref = Source.actorRef(3, OverflowStrategy.dropBuffer).to(Sink.fromSubscriber(s)).run()
-      val sub = s.expectSubscription
-      ref ! 1
-      ref ! 2
-      ref ! 3
+    "complete and materialize the stream after receiving Status.Success" in assertAllStagesStopped {
+      val (ref, done) = {
+        Source.actorRef(3, OverflowStrategy.dropBuffer).toMat(Sink.ignore)(Keep.both).run()
+      }
       ref ! Status.Success("ok")
-      sub.request(2) // not all elements drained yet
-      s.expectNext(1, 2)
-      ref ! PoisonPill
-      s.expectComplete() // element `3` not signaled
+      done.futureValue should be(Done)
     }
 
     "fail the stream when receiving Status.Failure" in assertAllStagesStopped {

@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2015-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2015-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.event
 
 import akka.dispatch.MessageQueue
@@ -10,13 +11,15 @@ import com.typesafe.config.Config
 import akka.actor.ActorSystem
 import akka.actor.ActorRef
 import akka.dispatch.ProducesMessageQueue
+import akka.event.Logging.LogEvent
+import akka.util.unused
 
 trait LoggerMessageQueueSemantics
 
 /**
  * INTERNAL API
  */
-private[akka] class LoggerMailboxType(settings: ActorSystem.Settings, config: Config) extends MailboxType
+private[akka] class LoggerMailboxType(@unused settings: ActorSystem.Settings, @unused config: Config) extends MailboxType
   with ProducesMessageQueue[LoggerMailbox] {
 
   override def create(owner: Option[ActorRef], system: Option[ActorSystem]) = (owner, system) match {
@@ -28,18 +31,27 @@ private[akka] class LoggerMailboxType(settings: ActorSystem.Settings, config: Co
 /**
  * INTERNAL API
  */
-private[akka] class LoggerMailbox(owner: ActorRef, system: ActorSystem)
+private[akka] class LoggerMailbox(@unused owner: ActorRef, system: ActorSystem)
   extends UnboundedMailbox.MessageQueue with LoggerMessageQueueSemantics {
 
   override def cleanUp(owner: ActorRef, deadLetters: MessageQueue): Unit = {
     if (hasMessages) {
+      val logLevel = system.eventStream.logLevel
       var envelope = dequeue
       // Drain all remaining messages to the StandardOutLogger.
       // cleanUp is called after switching out the mailbox, which is why
       // this kind of look works without a limit.
+      val loggingEnabled = Logging.AllLogLevels.contains(logLevel)
       while (envelope ne null) {
-        // Logging.StandardOutLogger is a MinimalActorRef, i.e. not a "real" actor
-        Logging.StandardOutLogger.tell(envelope.message, envelope.sender)
+        // skip logging if level is OFF
+        if (loggingEnabled)
+          envelope.message match {
+            case e: LogEvent if e.level <= logLevel ⇒
+              // Logging.StandardOutLogger is a MinimalActorRef, i.e. not a "real" actor
+              Logging.StandardOutLogger.tell(envelope.message, envelope.sender)
+            case _ ⇒ // skip
+          }
+
         envelope = dequeue
       }
     }

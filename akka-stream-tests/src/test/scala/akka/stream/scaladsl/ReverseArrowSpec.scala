@@ -1,10 +1,13 @@
+/*
+ * Copyright (C) 2018-2019 Lightbend Inc. <https://www.lightbend.com>
+ */
+
 package akka.stream.scaladsl
 
 import akka.stream.testkit._
 import akka.stream._
 import scala.concurrent.Await
 import scala.concurrent.duration._
-import org.scalactic.ConversionCheckedTripleEquals
 
 class ReverseArrowSpec extends StreamSpec {
   import GraphDSL.Implicits._
@@ -161,7 +164,7 @@ class ReverseArrowSpec extends StreamSpec {
         val src = b.add(source)
         src ~> f
         sink2 <~ f
-        (the[IllegalArgumentException] thrownBy (s <~ f <~ src)).getMessage should include("already connected")
+        (the[IllegalArgumentException] thrownBy (s <~ f <~ src)).getMessage should include("[StatefulMapConcat.out] is already connected")
         ClosedShape
       }).run(), 1.second) should ===(Seq(1, 2, 3))
     }

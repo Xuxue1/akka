@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.persistence
 
 import scala.concurrent.duration._
@@ -11,11 +12,11 @@ import akka.actor._
 import akka.testkit._
 
 object PerformanceSpec {
-  // multiply cycles with 200 for more
-  // accurate throughput measurements
   val config =
     """
-      akka.persistence.performance.cycles.load = 1000
+      akka.persistence.performance.cycles.load = 100
+      # more accurate throughput measurements
+      #akka.persistence.performance.cycles.load = 200000
     """
 
   case object StopMeasure

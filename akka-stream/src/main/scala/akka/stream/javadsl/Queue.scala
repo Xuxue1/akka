@@ -1,11 +1,13 @@
-/**
- * Copyright (C) 2015-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2015-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.javadsl
 
-import akka.Done
-import java.util.concurrent.CompletionStage
 import java.util.Optional
+import java.util.concurrent.CompletionStage
+
+import akka.Done
 import akka.stream.QueueOfferResult
 
 /**
@@ -19,15 +21,19 @@ trait SourceQueue[T] {
    * - completes with `Dropped` when stream dropped offered element
    * - completes with `QueueClosed` when stream is completed during future is active
    * - completes with `Failure(f)` when failure to enqueue element from upstream
-   * - fails when stream is completed or you cannot call offer in this moment because of implementation rules
-   * (like for backpressure mode and full buffer you need to wait for last offer call Future completion)
+   * - fails when stream is completed
+   *
+   * Additionally when using the backpressure overflowStrategy:
+   * - If the buffer is full the Future won't be completed until there is space in the buffer
+   * - Calling offer before the Future is completed in this case will return a failed Future
    *
    * @param elem element to send to a stream
    */
   def offer(elem: T): CompletionStage[QueueOfferResult]
 
   /**
-   * Method returns future that completes when stream is completed and fails when stream failed
+   * Method returns a [[CompletionStage]] that will be completed if this
+   * operator completes, or will be failed when the stream is failed.
    */
   def watchCompletion(): CompletionStage[Done]
 }
@@ -39,14 +45,27 @@ trait SourceQueueWithComplete[T] extends SourceQueue[T] {
   /**
    * Complete the stream normally. Use `watchCompletion` to be notified of this
    * operation’s success.
+   *
+   * Note that this only means the elements have been passed downstream, not
+   * that downstream has successfully processed them.
    */
   def complete(): Unit
 
   /**
    * Complete the stream with a failure. Use `watchCompletion` to be notified of this
    * operation’s success.
+   *
+   * Note that this only means the elements have been passed downstream, not
+   * that downstream has successfully processed them.
    */
   def fail(ex: Throwable): Unit
+
+  /**
+   * Method returns a [[CompletionStage]] that will be completed if this
+   * operator completes, or will be failed when the stream fails,
+   * for example when [[SourceQueueWithComplete.fail]] is invoked.
+   */
+  override def watchCompletion(): CompletionStage[Done]
 }
 
 /**

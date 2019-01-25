@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.cluster
 
 import scala.concurrent.duration._
@@ -37,7 +38,6 @@ abstract class LeaderDowningAllOtherNodesSpec
   with MultiNodeClusterSpec {
 
   import LeaderDowningAllOtherNodesMultiJvmSpec._
-  import ClusterEvent._
 
   "A cluster of 6 nodes with monitored-by-nr-of-members=2" must {
     "setup" taggedAs LongRunningTest in {

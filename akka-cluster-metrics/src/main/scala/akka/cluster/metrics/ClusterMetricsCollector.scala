@@ -1,13 +1,13 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.cluster.metrics
 
 import akka.actor.Actor
 import akka.actor.ActorLogging
 import akka.actor.Props
 import akka.actor.Address
-import akka.cluster.InternalClusterAction
 import akka.cluster.ClusterEvent
 import akka.cluster.Member
 import akka.cluster.Cluster
@@ -112,26 +112,25 @@ private[metrics] final case class MetricsGossipEnvelope(from: Address, gossip: M
 
 /**
  * INTERNAL API.
+ */
+private[metrics] object ClusterMetricsCollector {
+  case object MetricsTick
+  case object GossipTick
+}
+
+/**
+ * INTERNAL API.
  *
  * Actor responsible for periodic data sampling in the node and publication to the cluster.
  */
 private[metrics] class ClusterMetricsCollector extends Actor with ActorLogging {
-  import InternalClusterAction._
-  // TODO collapse to ClusterEvent._ after akka-cluster metrics is gone
-  import ClusterEvent.MemberEvent
-  import ClusterEvent.MemberUp
-  import ClusterEvent.MemberWeaklyUp
-  import ClusterEvent.MemberRemoved
-  import ClusterEvent.MemberExited
-  import ClusterEvent.ReachabilityEvent
-  import ClusterEvent.ReachableMember
-  import ClusterEvent.UnreachableMember
-  import ClusterEvent.CurrentClusterState
+  import ClusterMetricsCollector._
+  import ClusterEvent._
   import Member.addressOrdering
   import context.dispatcher
   val cluster = Cluster(context.system)
   import cluster.{ selfAddress, scheduler }
-  import cluster.InfoLogger._
+  import cluster.ClusterLogger._
   val metrics = ClusterMetricsExtension(context.system)
   import metrics.settings._
 

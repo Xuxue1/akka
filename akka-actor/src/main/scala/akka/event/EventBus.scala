@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.event
@@ -185,12 +185,12 @@ trait SubchannelClassification { this: EventBus ⇒
     cache.values exists { _ contains subscriber }
 
   private def removeFromCache(changes: immutable.Seq[(Classifier, Set[Subscriber])]): Unit =
-    cache = (cache /: changes) {
+    cache = changes.foldLeft(cache) {
       case (m, (c, cs)) ⇒ m.updated(c, m.getOrElse(c, Set.empty[Subscriber]) diff cs)
     }
 
   private def addToCache(changes: immutable.Seq[(Classifier, Set[Subscriber])]): Unit =
-    cache = (cache /: changes) {
+    cache = changes.foldLeft(cache) {
       case (m, (c, cs)) ⇒ m.updated(c, m.getOrElse(c, Set.empty[Subscriber]) union cs)
     }
 
@@ -412,112 +412,3 @@ trait ManagedActorClassification { this: ActorEventBus with ActorClassifier ⇒
   }
 }
 
-/**
- * Maps ActorRefs to ActorRefs to form an EventBus where ActorRefs can listen to other ActorRefs
- */
-@deprecated("Use Managed ActorClassification instead", "2.4")
-trait ActorClassification { this: ActorEventBus with ActorClassifier ⇒
-  import java.util.concurrent.ConcurrentHashMap
-  import scala.annotation.tailrec
-  private val empty = immutable.TreeSet.empty[ActorRef]
-  private val mappings = new ConcurrentHashMap[ActorRef, immutable.TreeSet[ActorRef]](mapSize)
-
-  @tailrec
-  protected final def associate(monitored: ActorRef, monitor: ActorRef): Boolean = {
-    val current = mappings get monitored
-    current match {
-      case null ⇒
-        if (monitored.isTerminated) false
-        else {
-          if (mappings.putIfAbsent(monitored, empty + monitor) ne null) associate(monitored, monitor)
-          else if (monitored.isTerminated) !dissociate(monitored, monitor) else true
-        }
-      case raw: immutable.TreeSet[_] ⇒
-        val v = raw.asInstanceOf[immutable.TreeSet[ActorRef]]
-        if (monitored.isTerminated) false
-        if (v.contains(monitor)) true
-        else {
-          val added = v + monitor
-          if (!mappings.replace(monitored, v, added)) associate(monitored, monitor)
-          else if (monitored.isTerminated) !dissociate(monitored, monitor) else true
-        }
-    }
-  }
-
-  protected final def dissociate(monitored: ActorRef): immutable.Iterable[ActorRef] = {
-    @tailrec
-    def dissociateAsMonitored(monitored: ActorRef): immutable.Iterable[ActorRef] = {
-      val current = mappings get monitored
-      current match {
-        case null ⇒ empty
-        case raw: immutable.TreeSet[_] ⇒
-          val v = raw.asInstanceOf[immutable.TreeSet[ActorRef]]
-          if (!mappings.remove(monitored, v)) dissociateAsMonitored(monitored)
-          else v
-      }
-    }
-
-    def dissociateAsMonitor(monitor: ActorRef): Unit = {
-      val i = mappings.entrySet.iterator
-      while (i.hasNext()) {
-        val entry = i.next()
-        val v = entry.getValue
-        v match {
-          case raw: immutable.TreeSet[_] ⇒
-            val monitors = raw.asInstanceOf[immutable.TreeSet[ActorRef]]
-            if (monitors.contains(monitor))
-              dissociate(entry.getKey, monitor)
-          case _ ⇒ //Dun care
-        }
-      }
-    }
-
-    try { dissociateAsMonitored(monitored) } finally { dissociateAsMonitor(monitored) }
-  }
-
-  @tailrec
-  protected final def dissociate(monitored: ActorRef, monitor: ActorRef): Boolean = {
-    val current = mappings get monitored
-    current match {
-      case null ⇒ false
-      case raw: immutable.TreeSet[_] ⇒
-        val v = raw.asInstanceOf[immutable.TreeSet[ActorRef]]
-        val removed = v - monitor
-        if (removed eq raw) false
-        else if (removed.isEmpty) {
-          if (!mappings.remove(monitored, v)) dissociate(monitored, monitor) else true
-        } else {
-          if (!mappings.replace(monitored, v, removed)) dissociate(monitored, monitor) else true
-        }
-    }
-  }
-
-  /**
-   * Returns the Classifier associated with the specified Event
-   */
-  protected def classify(event: Event): Classifier
-
-  /**
-   * This is a size hint for the number of Classifiers you expect to have (use powers of 2)
-   */
-  protected def mapSize: Int
-
-  def publish(event: Event): Unit = mappings.get(classify(event)) match {
-    case null ⇒ ()
-    case some ⇒ some foreach { _ ! event }
-  }
-
-  def subscribe(subscriber: Subscriber, to: Classifier): Boolean =
-    if (subscriber eq null) throw new IllegalArgumentException("Subscriber is null")
-    else if (to eq null) throw new IllegalArgumentException("Classifier is null")
-    else associate(to, subscriber)
-
-  def unsubscribe(subscriber: Subscriber, from: Classifier): Boolean =
-    if (subscriber eq null) throw new IllegalArgumentException("Subscriber is null")
-    else if (from eq null) throw new IllegalArgumentException("Classifier is null")
-    else dissociate(from, subscriber)
-
-  def unsubscribe(subscriber: Subscriber): Unit =
-    if (subscriber eq null) throw new IllegalArgumentException("Subscriber is null")
-    else dissociate(subscriber)
-}

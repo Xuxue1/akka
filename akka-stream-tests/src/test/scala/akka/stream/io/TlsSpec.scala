@@ -1,3 +1,7 @@
+/*
+ * Copyright (C) 2018-2019 Lightbend Inc. <https://www.lightbend.com>
+ */
+
 package akka.stream.io
 
 import java.security.KeyStore
@@ -12,7 +16,6 @@ import scala.concurrent.Await
 import scala.concurrent.Future
 import scala.concurrent.duration._
 import scala.util.Random
-
 import akka.actor.ActorSystem
 import akka.pattern.{ after ⇒ later }
 import akka.stream._
@@ -20,10 +23,11 @@ import akka.stream.TLSProtocol._
 import akka.stream.scaladsl._
 import akka.stream.stage._
 import akka.stream.testkit._
-import akka.stream.testkit.Utils._
-import akka.testkit.EventFilter
-import akka.util.ByteString
+import akka.stream.testkit.scaladsl.StreamTestKit._
+import akka.util.{ ByteString, JavaVersion }
 import javax.net.ssl._
+import akka.stream.impl.fusing.GraphStages.SimpleLinearGraphStage
+import akka.testkit.WithLogCapturing
 
 object TlsSpec {
 
@@ -52,7 +56,7 @@ object TlsSpec {
   def initSslContext(): SSLContext = initWithTrust("/truststore")
 
   /**
-   * This is a stage that fires a TimeoutException failure 2 seconds after it was started,
+   * This is an operator that fires a TimeoutException failure 2 seconds after it was started,
    * independent of the traffic going through. The purpose is to include the last seen
    * element in the exception message to help in figuring out what went wrong.
    */
@@ -81,9 +85,15 @@ object TlsSpec {
     }
   }
 
+  val configOverrides =
+    """
+      akka.loglevel = DEBUG # issue 21660
+      akka.loggers = ["akka.testkit.SilenceAllTestEventListener"]
+      akka.actor.debug.receive=off
+    """
 }
 
-class TlsSpec extends StreamSpec("akka.loglevel=INFO\nakka.actor.debug.receive=off") {
+class TlsSpec extends StreamSpec(TlsSpec.configOverrides) with WithLogCapturing {
   import TlsSpec._
 
   import system.dispatcher
@@ -212,14 +222,14 @@ class TlsSpec extends StreamSpec("akka.loglevel=INFO\nakka.actor.debug.receive=o
     object MediumMessages extends PayloadScenario {
       val strs = "0123456789" map (d ⇒ d.toString * (rnd.nextInt(9000) + 1000))
       def inputs = strs map (s ⇒ SendBytes(ByteString(s)))
-      def output = ByteString((strs :\ "")(_ ++ _))
+      def output = ByteString(strs.foldRight("")(_ ++ _))
     }
 
     object LargeMessages extends PayloadScenario {
       // TLS max packet size is 16384 bytes
       val strs = "0123456789" map (d ⇒ d.toString * (rnd.nextInt(9000) + 17000))
       def inputs = strs map (s ⇒ SendBytes(ByteString(s)))
-      def output = ByteString((strs :\ "")(_ ++ _))
+      def output = ByteString(strs.foldRight("")(_ ++ _))
     }
 
     object EmptyBytesFirst extends PayloadScenario {
@@ -351,12 +361,17 @@ class TlsSpec extends StreamSpec("akka.loglevel=INFO\nakka.actor.debug.receive=o
         val f =
           Source(scenario.inputs)
             .via(commPattern.decorateFlow(scenario.leftClosing, scenario.rightClosing, onRHS))
-            .transform(() ⇒ new PushStage[SslTlsInbound, SslTlsInbound] {
-              override def onPush(elem: SslTlsInbound, ctx: Context[SslTlsInbound]) =
-                ctx.push(elem)
-              override def onDownstreamFinish(ctx: Context[SslTlsInbound]) = {
-                system.log.debug("me cancelled")
-                ctx.finish()
+            .via(new SimpleLinearGraphStage[SslTlsInbound] {
+              override def createLogic(inheritedAttributes: Attributes) = new GraphStageLogic(shape) with InHandler with OutHandler {
+                setHandlers(in, out, this)
+
+                override def onPush() = push(out, grab(in))
+                override def onPull() = pull(in)
+
+                override def onDownstreamFinish() = {
+                  system.log.debug("me cancelled")
+                  completeStage()
+                }
               }
             })
             .via(debug)
@@ -369,12 +384,6 @@ class TlsSpec extends StreamSpec("akka.loglevel=INFO\nakka.actor.debug.receive=o
         Await.result(f, 8.seconds).utf8String should be(scenario.output.utf8String)
 
         commPattern.cleanup()
-
-        // flush log so as to not mix up logs of different test cases
-        if (log.isDebugEnabled)
-          EventFilter.debug("stopgap", occurrences = 1) intercept {
-            log.debug("stopgap")
-          }
       }
     }
 
@@ -390,16 +399,20 @@ class TlsSpec extends StreamSpec("akka.loglevel=INFO\nakka.actor.debug.receive=o
       // under error conditions, and has the bonus of matching most actual SSL deployments.
       val (server, serverErr) = Tcp()
         .bind("localhost", 0)
-        .map(c ⇒ {
+        .mapAsync(1)(c ⇒
           c.flow.joinMat(serverTls(IgnoreBoth).reversed.joinMat(simple)(Keep.right))(Keep.right).run()
-        })
+        )
         .toMat(Sink.head)(Keep.both).run()
 
       val clientErr = simple.join(badClientTls(IgnoreBoth))
         .join(Tcp().outgoingConnection(Await.result(server, 1.second).localAddress)).run()
 
-      Await.result(serverErr.flatMap(identity), 1.second).getMessage should include("certificate_unknown")
-      Await.result(clientErr, 1.second).getMessage should equal("General SSLEngine problem")
+      Await.result(serverErr, 1.second).getMessage should include("certificate_unknown")
+      val clientErrText = Await.result(clientErr, 1.second).getMessage
+      if (JavaVersion.majorVersion >= 11)
+        clientErrText should include("unable to find valid certification path to requested target")
+      else
+        clientErrText should equal("General SSLEngine problem")
     }
 
     "reliably cancel subscriptions when TransportIn fails early" in assertAllStagesStopped {
@@ -463,6 +476,25 @@ class TlsSpec extends StreamSpec("akka.loglevel=INFO\nakka.actor.debug.receive=o
           .runWith(Sink.last)
 
       Await.result(f, 8.second).utf8String should be(scenario.output.utf8String)
+    }
+
+    "verify hostname" in assertAllStagesStopped {
+      def run(hostName: String): Future[akka.Done] = {
+        val rhs = Flow[SslTlsInbound]
+          .map {
+            case SessionTruncated   ⇒ SendBytes(ByteString.empty)
+            case SessionBytes(_, b) ⇒ SendBytes(b)
+          }
+        val clientTls = TLS(sslContext, None, cipherSuites, Client, EagerClose, Some((hostName, 80)))
+        val flow = clientTls atop serverTls(EagerClose).reversed join rhs
+
+        Source.single(SendBytes(ByteString.empty)).via(flow).runWith(Sink.ignore)
+      }
+      Await.result(run("akka-remote"), 3.seconds) // CN=akka-remote
+      val cause = intercept[Exception] {
+        Await.result(run("unknown.example.org"), 3.seconds)
+      }
+      cause.getMessage should ===("Hostname verification failed! Expected session to be for unknown.example.org")
     }
 
   }

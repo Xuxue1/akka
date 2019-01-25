@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2015-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2015-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.pattern
 
 import scala.concurrent.Promise
@@ -41,7 +42,7 @@ object CircuitBreakerStressSpec {
       case JobDone ⇒
         doneCount += 1
         breaker.withCircuitBreaker(job).pipeTo(self)
-      case Failure(ex: CircuitBreakerOpenException) ⇒
+      case Failure(_: CircuitBreakerOpenException) ⇒
         circCount += 1
         breaker.withCircuitBreaker(job).pipeTo(self)
       case Failure(_: TimeoutException) ⇒

@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.cluster.singleton
 
 import org.scalatest.{ BeforeAndAfterAll, Matchers, WordSpecLike }
@@ -15,9 +16,11 @@ class ClusterSingletonProxySpec extends WordSpecLike with Matchers with BeforeAn
   import ClusterSingletonProxySpec._
 
   val seed = new ActorSys()
-  seed.cluster.join(seed.cluster.selfAddress)
 
-  val testSystems = (0 until 4).map(_ ⇒ new ActorSys(joinTo = Some(seed.cluster.selfAddress))) :+ seed
+  val testSystems = {
+    val joiners = (0 until 4).map(n ⇒ new ActorSys(joinTo = Some(seed.cluster.selfAddress)))
+    joiners :+ seed
+  }
 
   "The cluster singleton proxy" must {
     "correctly identify the singleton" in {
@@ -26,7 +29,9 @@ class ClusterSingletonProxySpec extends WordSpecLike with Matchers with BeforeAn
     }
   }
 
-  override def afterAll() = testSystems.foreach(_.system.terminate())
+  override def afterAll(): Unit = testSystems.foreach { sys ⇒
+    TestKit.shutdownActorSystem(sys.system)
+  }
 }
 
 object ClusterSingletonProxySpec {
@@ -35,7 +40,7 @@ object ClusterSingletonProxySpec {
     extends TestKit(ActorSystem(name, ConfigFactory.parseString(cfg))) {
 
     val cluster = Cluster(system)
-    joinTo.foreach(address ⇒ cluster.join(address))
+    cluster.join(joinTo.getOrElse(cluster.selfAddress))
 
     cluster.registerOnMemberUp {
       system.actorOf(
@@ -50,21 +55,18 @@ object ClusterSingletonProxySpec {
       "user/singletonManager",
       settings = ClusterSingletonProxySettings(system)), s"singletonProxy-${cluster.selfAddress.port.getOrElse(0)}")
 
-    def testProxy(msg: String) {
+    def testProxy(msg: String): Unit = {
       val probe = TestProbe()
       probe.send(proxy, msg)
       // 25 seconds to make sure the singleton was started up
-      probe.expectMsg(25.seconds, "Got " + msg)
+      probe.expectMsg(25.seconds, s"while testing the proxy from ${cluster.selfAddress}", "Got " + msg)
     }
   }
 
   val cfg = """
     akka {
       loglevel = INFO
-      cluster {
-        auto-down-unreachable-after = 10s
-        min-nr-of-members = 2
-      }
+      cluster.jmx.enabled = off
       actor.provider = "cluster"
       remote {
         log-remote-lifecycle-events = off
@@ -86,6 +88,7 @@ object ClusterSingletonProxySpec {
 
     def receive: Actor.Receive = {
       case msg ⇒
+        log.info(s"Got $msg")
         sender() ! "Got " + msg
     }
   }

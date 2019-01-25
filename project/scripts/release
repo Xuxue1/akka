@@ -51,25 +51,17 @@
 #                          "<your username>",
 #                          "<your password>")
 #
-# 3) You must have access to repo.akka.io
+# 3) You must have access to gustav.akka.io
+#    Please note that gustav.akka.io is the same as repo.akka.io, 
+#    but the latter domain is pointed at cloudflare so one could not ssh into it.
 #
 # 3.1) Ask someone in the team for login information for the akkarepo user.
 #
 # 3.2) Install your public ssh key to avoid typing in your password.
 #      From the command line:
-#        shell> cat ~/.ssh/id_rsa.pub | ssh akkarepo@repo.akka.io "cat >> ~/.ssh/authorized_keys"
-#
-# 4) You must have upload access to S3 bucket "downloads.typesafe.com"
-#
-# 4.1) Ask Akka team member for the AWS access key for 'akka.team' user.
-#
-# 4.2) Add your credentials to sbt by adding this to your global.sbt file
-#        credentials += Credentials("Amazon S3",
-#          "downloads.typesafe.com.s3.amazonaws.com",
-#          "<Access Key Id>",
-#          "<Secret Access Key>")
-#
-# 5) Have access to github.com/akka/akka. This should be a given.
+#        shell> cat ~/.ssh/id_rsa.pub | ssh akkarepo@gustav.akka.io "cat >> ~/.ssh/authorized_keys"
+##
+# 4) Have access to github.com/akka/akka. This should be a given.
 #
 # Now you should be all set to run the script
 #
@@ -84,7 +76,7 @@
 # https://docs.sonatype.org/display/Repository/Sonatype+OSS+Maven+Repository+Usage+Guide
 
 # defaults
-declare -r default_server="akkarepo@repo.akka.io"
+declare -r default_server="akkarepo@gustav.akka.io"
 declare -r default_path="www"
 
 # settings
@@ -170,7 +162,9 @@ fi
 declare -r version=$1
 declare -r publish_path="${release_server}:${release_path}"
 
-[[ `java -version 2>&1 | grep -E "java version|openjdk version" | cut -d ' ' -f3 | cut -d '.' -f2` -eq 8 ]] || fail "Java version is not 1.8"
+JAVA_VERSION=`java -version 2>&1 | grep -E "java version|openjdk version" | cut -d '"' -f2 | cut -d '.' -f1`
+
+[[ $JAVA_VERSION -ge 9 ]] || fail "Java version is not at least 9"
 
 # check for a git command
 type -P git &> /dev/null || fail "git command not found"
@@ -194,7 +188,7 @@ function get_current_branch {
 # get the current project version from sbt
 # a little messy as the ansi escape codes are included
 function get_current_version {
-  local result=$(sbt version | grep -v warn | tail -1 | cut -f2)
+  local result=$(sbt version | grep -v warn | grep -v "coordinated shutdown" | tail -1 | cut -f2)
   # remove ansi escape code from end
   local code0=$(echo -e "\033[0m")
   echo ${result%$code0}
@@ -275,7 +269,11 @@ try ssh -t ${release_server} echo "Successfully contacted release server."
 
 echolog "Getting current project version from sbt..."
 declare -r current_version=$(get_current_version)
-echolog "Current version is ${current_version}"
+echolog "Current version is ${current_version} on branch $initial_branch"
+
+if [ "${current_version:0:3}" != "${version:0:3}" ]; then
+  fail "Releasing $version from wrong branch $initial_branch with version $current_version"
+fi
 
 # check out a release branch
 try git checkout -b ${release_branch}
@@ -306,9 +304,11 @@ echolog "Successfully created local release"
 # check binary compatibility for dry run
 if [ ! $no_mima ] && [ $dry_run ]; then
   echodry "Running migration manager report..."
-  sbt mimaReportBinaryIssues
+  sbt +mimaReportBinaryIssues
   echodry "Finished migration manager report"
 fi
+
+try sbt whitesourceCheckPolicies
 
 # commit and tag this release
 echolog "Committing and tagging..."
@@ -353,18 +353,26 @@ else
   important git push origin --tags
 fi
 
+echolog "Uploading whitesource report"
+if [ $dry_run ]; then
+  echodry "Not actually uploading whitesource report. Commands:"
+  echodry "  sbt whitesourceUpdate"
+else
+  important sbt whitesourceUpdate
+fi
+
 # push the release to the server
 echolog "Pushing ${release_dir} to ${publish_path} ..."
 if [ $dry_run ]; then
-  echodry "Not actually pushing to server. Command:"
-  echodry "  rsync -rlpvz --chmod=Dg+ws,Fg+w --exclude ${release_dir}/downloads ${release_dir}/ ${publish_path}/"
-  echodry "  sbt uploadRelease"
+  echodry "Not actually pushing to server. Commands:"
+  echodry "  sbt deployRsync"
+  echodry "  rsync -rlpvz --chmod=Dg+ws,Fg+w --exclude ${release_dir}/downloads --exclude ${release_dir}/docs ${release_dir}/ ${publish_path}/"
 else
   important ssh ${release_server} "cd ${release_path}/docs/akka; git add .; git commit -m 'before publishing version $version'; true"
-  important rsync -rlpvz --chmod=Dg+ws,Fg+w --exclude ${release_dir}/downloads ${release_dir}/ ${publish_path}/
-  important sbt uploadRelease
-  important ssh ${release_server} cp -v ${release_path}/docs/akka/${version}/_static/warnOldDocs.js ${release_path}/docs/akka
-  important ssh ${release_server} ln -snvf ../../warnOldDocs.js ${release_path}/docs/akka/${version}/_static/warnOldDocs.js
+  important sbt "deployRsync ${release_server}"
+  important rsync -rlpvz --chmod=Dg+ws,Fg+w --exclude ${release_dir}/downloads --exclude ${release_dir}/docs ${release_dir}/ ${publish_path}/
+  #important ssh ${release_server} cp -v ${release_path}/docs/akka/${version}/_static/warnOldDocs.js ${release_path}/docs/akka
+  #important ssh ${release_server} ln -snvf ../../warnOldDocs.js ${release_path}/docs/akka/${version}/_static/warnOldDocs.js
   important ssh ${release_server} "cd ${release_path}/docs/akka; git add .; git commit -m 'publish version $version'"
 fi
 

@@ -1,14 +1,14 @@
-/**
- * Copyright (C) 2014-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2014-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.scaladsl
 
-import akka.stream.{ FlowShape, ActorMaterializer, ActorMaterializerSettings, OverflowStrategy }
+import akka.stream.{ ActorMaterializer, ActorMaterializerSettings, FlowShape, OverflowStrategy }
 import akka.stream.testkit._
-import akka.stream.testkit.Utils._
+import akka.stream.testkit.scaladsl.StreamTestKit._
 import akka.stream.testkit.scaladsl._
 import com.typesafe.config.ConfigFactory
-import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time._
 
 import scala.collection.immutable

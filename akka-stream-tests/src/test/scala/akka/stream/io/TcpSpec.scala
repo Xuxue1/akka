@@ -1,30 +1,40 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.io
 
-import akka.NotUsed
-import akka.actor.{ ActorSystem, Address, Kill }
+import java.net._
+import java.security.SecureRandom
+import java.util.concurrent.atomic.AtomicInteger
+
+import javax.net.ssl.{ KeyManagerFactory, SSLContext, TrustManagerFactory }
+import akka.actor.{ ActorIdentity, ActorSystem, ExtendedActorSystem, Identify, Kill }
 import akka.io.Tcp._
-import akka.stream.scaladsl.Tcp.IncomingConnection
+import akka.stream._
+import akka.stream.scaladsl.Tcp.{ IncomingConnection, ServerBinding }
 import akka.stream.scaladsl.{ Flow, _ }
-import akka.stream.testkit.TestUtils.temporaryServerAddress
-
-import scala.util.control.NonFatal
-import akka.stream.testkit.Utils._
+import akka.stream.testkit.scaladsl.StreamTestKit._
 import akka.stream.testkit._
-import akka.stream.{ ActorMaterializer, BindFailedException, StreamTcpException }
-import akka.util.{ ByteString, Helpers }
-
-import scala.collection.immutable
-import scala.concurrent.{ Await, Promise }
-import scala.concurrent.duration._
-import java.net.{ BindException, InetSocketAddress }
-
-import akka.testkit.{ EventFilter, TestLatch }
+import akka.testkit.{ EventFilter, TestKit, TestLatch, TestProbe }
+import akka.testkit.SocketUtil.temporaryServerAddress
+import akka.testkit.WithLogCapturing
+import akka.util.ByteString
+import akka.{ Done, NotUsed }
+import com.typesafe.config.ConfigFactory
+import org.scalatest.concurrent.PatienceConfiguration
 import org.scalatest.concurrent.PatienceConfiguration.Timeout
 
-class TcpSpec extends StreamSpec("akka.stream.materializer.subscription-timeout.timeout = 2s") with TcpHelper {
+import scala.collection.immutable
+import scala.concurrent.duration._
+import scala.concurrent.{ Await, ExecutionContext, Future, Promise }
+
+class TcpSpec extends StreamSpec("""
+    akka.loglevel = debug
+    akka.loggers = ["akka.testkit.SilenceAllTestEventListener"]
+    akka.io.tcp.trace-logging = true
+    akka.stream.materializer.subscription-timeout.timeout = 2s
+  """) with TcpHelper with WithLogCapturing {
 
   "Outgoing TCP stream" must {
 
@@ -86,9 +96,7 @@ class TcpSpec extends StreamSpec("akka.stream.materializer.subscription-timeout.
         .toMat(Sink.ignore)(Keep.left)
         .run()
 
-      whenReady(future.failed) { ex ⇒
-        ex.getMessage should ===("Connection failed.")
-      }
+      future.failed.futureValue shouldBe a[StreamTcpException]
     }
 
     "work when client closes write, then remote closes write" in assertAllStagesStopped {
@@ -362,14 +370,14 @@ class TcpSpec extends StreamSpec("akka.stream.materializer.subscription-timeout.
         Flow.fromSinkAndSourceMat(Sink.ignore, Source.single(ByteString("Early response")))(Keep.right)
 
       val binding =
-        Tcp().bind(serverAddress.getHostName, serverAddress.getPort, halfClose = false).toMat(Sink.foreach { conn ⇒
+        Tcp().bind(serverAddress.getHostString, serverAddress.getPort, halfClose = false).toMat(Sink.foreach { conn ⇒
           conn.flow.join(writeButIgnoreRead).run()
         })(Keep.left)
           .run()
           .futureValue
 
       val (promise, result) = Source.maybe[ByteString]
-        .via(Tcp().outgoingConnection(serverAddress.getHostName, serverAddress.getPort))
+        .via(Tcp().outgoingConnection(serverAddress.getHostString, serverAddress.getPort))
         .toMat(Sink.fold(ByteString.empty)(_ ++ _))(Keep.both)
         .run()
 
@@ -383,7 +391,7 @@ class TcpSpec extends StreamSpec("akka.stream.materializer.subscription-timeout.
       val serverAddress = temporaryServerAddress()
 
       val binding =
-        Tcp().bind(serverAddress.getHostName, serverAddress.getPort, halfClose = false).toMat(Sink.foreach { conn ⇒
+        Tcp().bind(serverAddress.getHostString, serverAddress.getPort, halfClose = false).toMat(Sink.foreach { conn ⇒
           conn.flow.join(Flow[ByteString]).run()
         })(Keep.left)
           .run()
@@ -399,23 +407,64 @@ class TcpSpec extends StreamSpec("akka.stream.materializer.subscription-timeout.
     }
 
     "handle when connection actor terminates unexpectedly" in {
-      val system2 = ActorSystem()
-      import system2.dispatcher
-      val mat2 = ActorMaterializer.create(system2)
+      val system2 = ActorSystem("TcpSpec-unexpected-system2", ConfigFactory.parseString(
+        """
+          akka.loglevel = DEBUG # issue #21660
+        """).withFallback(system.settings.config))
 
-      val serverAddress = temporaryServerAddress()
-      val binding = Tcp(system2).bindAndHandle(Flow[ByteString], serverAddress.getHostName, serverAddress.getPort)(mat2)
+      try {
+        implicit val ec: ExecutionContext = system2.dispatcher
+        val mat2 = ActorMaterializer.create(system2)
 
-      val result = Source.maybe[ByteString].via(Tcp(system2).outgoingConnection(serverAddress)).runFold(0)(_ + _.size)(mat2)
+        val serverAddress = temporaryServerAddress()
+        val binding = Tcp(system2).bindAndHandle(Flow[ByteString], serverAddress.getHostString, serverAddress.getPort)(mat2).futureValue
 
-      // Getting rid of existing connection actors by using a blunt instrument
-      system2.actorSelection(akka.io.Tcp(system2).getManager.path / "selectors" / s"$$a" / "*") ! Kill
+        val probe = TestProbe()
+        val testMsg = ByteString(0)
+        val result =
+          Source.single(testMsg)
+            .concat(Source.maybe[ByteString])
+            .via(Tcp(system2).outgoingConnection(serverAddress))
+            .runForeach { msg ⇒ probe.ref ! msg }(mat2)
 
-      result.failed.futureValue shouldBe a[StreamTcpException]
+        // Ensure first that the actor is there
+        probe.expectMsg(testMsg)
 
-      binding.map(_.unbind()).recover { case NonFatal(_) ⇒ () } foreach (_ ⇒ system2.shutdown())
+        // Getting rid of existing connection actors by using a blunt instrument
+        val path = akka.io.Tcp(system2).getManager.path / "selectors" / s"$$a" / "*"
+
+        // Some more verbose info when #21839 happens again
+        system2.actorSelection(path).tell(Identify(), probe.ref)
+        try {
+          probe.expectMsgType[ActorIdentity].ref.get
+        } catch {
+          case _: AssertionError | _: NoSuchElementException ⇒
+            val tree = system2.asInstanceOf[ExtendedActorSystem].printTree
+            fail(s"No TCP selector actor running at [$path], actor tree: $tree")
+        }
+        system2.actorSelection(path) ! Kill
+
+        result.failed.futureValue shouldBe a[StreamTcpException]
+
+        binding.unbind()
+      } finally {
+        TestKit.shutdownActorSystem(system2)
+      }
     }
 
+    "provide full exceptions when connection attempt fails because name cannot be resolved" in {
+      val unknownHostName = "abcdefghijklmnopkuh"
+
+      val test =
+        Source.maybe
+          .viaMat(Tcp().outgoingConnection(unknownHostName, 12345))(Keep.right)
+          .to(Sink.ignore)
+          .run()
+          .failed
+          .futureValue
+
+      test.getCause shouldBe a[UnknownHostException]
+    }
   }
 
   "TCP listen stream" must {
@@ -427,7 +476,7 @@ class TcpSpec extends StreamSpec("akka.stream.materializer.subscription-timeout.
       val serverAddress = temporaryServerAddress()
       val (bindingFuture, echoServerFinish) =
         Tcp()
-          .bind(serverAddress.getHostName, serverAddress.getPort) // TODO getHostString in Java7
+          .bind(serverAddress.getHostString, serverAddress.getPort)
           .toMat(echoHandler)(Keep.both)
           .run()
 
@@ -439,9 +488,11 @@ class TcpSpec extends StreamSpec("akka.stream.materializer.subscription-timeout.
       val resultFuture =
         Source(testInput).via(Tcp().outgoingConnection(serverAddress)).runFold(ByteString.empty)((acc, in) ⇒ acc ++ in)
 
+      binding.whenUnbound.value should be(None)
       resultFuture.futureValue should be(expectedOutput)
       binding.unbind().futureValue
       echoServerFinish.futureValue
+      binding.whenUnbound.futureValue should be(Done)
     }
 
     "work with a chain of echoes" in {
@@ -454,6 +505,7 @@ class TcpSpec extends StreamSpec("akka.stream.materializer.subscription-timeout.
 
       // make sure that the server has bound to the socket
       val binding = bindingFuture.futureValue
+      binding.whenUnbound.value should be(None)
 
       val echoConnection = Tcp().outgoingConnection(serverAddress)
 
@@ -471,6 +523,7 @@ class TcpSpec extends StreamSpec("akka.stream.materializer.subscription-timeout.
       resultFuture.futureValue should be(expectedOutput)
       binding.unbind().futureValue
       echoServerFinish.futureValue
+      binding.whenUnbound.futureValue should be(Done)
     }
 
     "bind and unbind correctly" in EventFilter[BindException](occurrences = 2).intercept {
@@ -484,7 +537,7 @@ class TcpSpec extends StreamSpec("akka.stream.materializer.subscription-timeout.
 
       val probe2 = TestSubscriber.manualProbe[Tcp.IncomingConnection]()
       val binding2F = bind.to(Sink.fromSubscriber(probe2)).run()
-      probe2.expectSubscriptionAndError(BindFailedException)
+      probe2.expectSubscriptionAndError(signalDemand = true) shouldBe a[BindFailedException]
 
       val probe3 = TestSubscriber.manualProbe[Tcp.IncomingConnection]()
       val binding3F = bind.to(Sink.fromSubscriber(probe3)).run()
@@ -507,51 +560,147 @@ class TcpSpec extends StreamSpec("akka.stream.materializer.subscription-timeout.
     }
 
     "not shut down connections after the connection stream cancelled" in assertAllStagesStopped {
-      val address = temporaryServerAddress()
-      val (futureBinding, _) = Tcp().bind(address.getHostName, address.getPort).take(1).toMat(Sink.foreach { tcp ⇒
-        Thread.sleep(1000) // we're testing here to see if it survives such race
-        tcp.flow.join(Flow[ByteString]).run()
-      })(Keep.both)
-        .run()
 
-      // make sure server is running first
-      futureBinding.futureValue
+      // configure a few timeouts we do not want to hit
+      val config = ConfigFactory.parseString("""
+        akka.actor.serializer-messages = off
+        akka.io.tcp.register-timeout = 42s
+      """)
+      val serverSystem = ActorSystem("server", config)
+      val clientSystem = ActorSystem("client", config)
+      val serverMaterializer = ActorMaterializer(ActorMaterializerSettings(serverSystem)
+        .withSubscriptionTimeoutSettings(StreamSubscriptionTimeoutSettings(
+          StreamSubscriptionTimeoutTerminationMode.cancel, 42.seconds)))(serverSystem)
+      val clientMaterializer = ActorMaterializer(ActorMaterializerSettings(clientSystem)
+        .withSubscriptionTimeoutSettings(StreamSubscriptionTimeoutSettings(
+          StreamSubscriptionTimeoutTerminationMode.cancel, 42.seconds)))(clientSystem)
 
-      // then connect, should trigger a block and then
-      val total = Source(immutable.Iterable.fill(1000)(ByteString(0)))
-        .via(Tcp().outgoingConnection(address))
-        .runFold(0)(_ + _.size)
+      try {
 
-      total.futureValue should ===(1000)
+        val address = temporaryServerAddress()
+        val completeRequest = TestLatch()(serverSystem)
+        val serverGotRequest = Promise[Done]()
+
+        def portClosed(): Boolean =
+          try {
+            val socket = new Socket()
+            socket.connect(address, 250)
+            socket.close()
+            serverSystem.log.info("port open")
+            false
+          } catch {
+            case _: SocketTimeoutException ⇒ true
+            case _: SocketException        ⇒ true
+          }
+
+        import serverSystem.dispatcher
+        val futureBinding: Future[ServerBinding] =
+          Tcp(serverSystem).bind(address.getHostString, address.getPort)
+            // accept one connection, then cancel
+            .take(1)
+            // keep the accepted request hanging
+            .map { connection ⇒
+              serverGotRequest.success(Done)
+              Future {
+                Await.ready(completeRequest, remainingOrDefault) // wait for the port close below
+                // when the server has closed the port and stopped accepting incoming
+                // connections, complete the one accepted connection
+                connection.flow.join(Flow[ByteString]).run()
+              }
+            }
+            .to(Sink.ignore)
+            .run()(serverMaterializer)
+
+        // make sure server is running first
+        futureBinding.futureValue
+
+        // then connect once, which should lead to the server cancelling
+        val total = Source(immutable.Iterable.fill(100)(ByteString(0)))
+          .via(Tcp(clientSystem).outgoingConnection(address))
+          .runFold(0)(_ + _.size)(clientMaterializer)
+
+        serverGotRequest.future.futureValue
+        // this can take a bit of time worst case but is often swift
+        awaitCond(portClosed())
+        completeRequest.open()
+
+        total.futureValue should ===(100) // connection
+
+      } finally {
+        TestKit.shutdownActorSystem(serverSystem)
+        TestKit.shutdownActorSystem(clientSystem)
+      }
+    }
+
+    "handle single connection when connection flow is immediately cancelled" in assertAllStagesStopped {
+      implicit val ec: ExecutionContext = system.dispatcher
+
+      val (bindingFuture, connection) = Tcp(system).bind("localhost", 0).toMat(Sink.head)(Keep.both).run()
+
+      val proxy = connection.map { c ⇒
+        c.handleWith(Flow[ByteString])
+      }
+
+      val binding = bindingFuture.futureValue
+
+      val expected = ByteString("test")
+      val msg = Source.single(expected).via(Tcp(system).outgoingConnection(binding.localAddress)).runWith(Sink.head)
+      msg.futureValue shouldBe expected
+
+      binding.unbind()
     }
 
     "shut down properly even if some accepted connection Flows have not been subscribed to" in assertAllStagesStopped {
       val address = temporaryServerAddress()
       val firstClientConnected = Promise[Unit]()
-      val takeTwoAndDropSecond = Flow[IncomingConnection].map(conn ⇒ {
-        firstClientConnected.trySuccess(())
-        conn
-      }).grouped(2).take(1).map(_.head)
+      val secondClientIgnored = Promise[Unit]()
+      val connectionCounter = new AtomicInteger(0)
 
-      val (serverBound, serverDone) = Tcp().bind(address.getHostName, address.getPort)
-        .viaMat(takeTwoAndDropSecond)(Keep.left)
-        .toMat(Sink.foreach(_.flow.join(Flow[ByteString]).run()))(Keep.both)
+      val accept2ConnectionSink: Sink[IncomingConnection, NotUsed] =
+        Flow[IncomingConnection].take(2)
+          .mapAsync(2) { incoming ⇒
+            val connectionNr = connectionCounter.incrementAndGet()
+            if (connectionNr == 1) {
+              // echo
+              incoming.flow.joinMat(
+                Flow[ByteString].mapMaterializedValue { mat ⇒
+                  firstClientConnected.trySuccess(())
+                  mat
+                }.watchTermination()(Keep.right)
+              )(Keep.right).run()
+            } else {
+              // just ignore it
+              secondClientIgnored.trySuccess(())
+              Future.successful(Done)
+            }
+          }.to(Sink.ignore)
+
+      val serverBound = Tcp().bind(address.getHostString, address.getPort)
+        .toMat(accept2ConnectionSink)(Keep.left)
         .run()
 
       // make sure server has started
       serverBound.futureValue
 
-      val connectAndCountBytes = Source(immutable.Iterable.fill(100)(ByteString(0)))
+      val firstProbe = TestPublisher.probe[ByteString]()
+      val firstResult = Source.fromPublisher(firstProbe)
         .via(Tcp().outgoingConnection(address))
-        .fold(0)(_ + _.size).toMat(Sink.head)(Keep.right)
+        .runWith(Sink.seq)
 
-      val total = connectAndCountBytes.run()
+      // create the first connection and wait until the flow is running server side
+      firstClientConnected.future.futureValue(Timeout(5.seconds))
+      firstProbe.expectRequest()
+      firstProbe.sendNext(ByteString(23))
 
-      awaitAssert(firstClientConnected.future, 2.seconds)
+      // then connect the second one, which will be ignored
+      val rejected = Source(List(ByteString(67))).via(Tcp().outgoingConnection(address)).runWith(Sink.seq)
+      secondClientIgnored.future.futureValue
 
-      val rejected = connectAndCountBytes.run()
-      total.futureValue(Timeout(10.seconds)) should ===(100)
+      // first connection should be fine
+      firstProbe.sendComplete()
+      firstResult.futureValue(Timeout(10.seconds)) should ===(Seq(ByteString(23)))
 
+      // as the second server connection was never connected to it will be failed
       rejected.failed.futureValue(Timeout(5.seconds)) shouldBe a[StreamTcpException]
     }
 
@@ -562,7 +711,7 @@ class TcpSpec extends StreamSpec("akka.stream.materializer.subscription-timeout.
       try {
         val address = temporaryServerAddress()
 
-        val bindingFuture = Tcp().bindAndHandle(Flow[ByteString], address.getHostName, address.getPort)(mat2)
+        val bindingFuture = Tcp().bindAndHandle(Flow[ByteString], address.getHostString, address.getPort)(mat2)
 
         // Ensure server is running
         bindingFuture.futureValue
@@ -578,6 +727,95 @@ class TcpSpec extends StreamSpec("akka.stream.materializer.subscription-timeout.
         binding.unbind().futureValue
       } finally sys2.terminate()
     }
+
+  }
+
+  "TLS client and server convenience methods" should {
+
+    "allow for 'simple' TLS" in {
+      // cert is valid until 2025, so if this tests starts failing after that you need to create a new one
+      val (sslContext, firstSession) = initSslMess()
+      val address = temporaryServerAddress()
+
+      Tcp().bindAndHandleTls(
+        // just echo charactes until we reach '\n', then complete stream
+        // also - byte is our framing
+        Flow[ByteString].mapConcat(_.utf8String.toList)
+          .takeWhile(_ != '\n')
+          .map(c ⇒ ByteString(c)),
+        address.getHostName,
+        address.getPort,
+        sslContext,
+        firstSession
+      ).futureValue
+      system.log.info(s"Server bound to ${address.getHostString}:${address.getPort}")
+
+      val connectionFlow = Tcp().outgoingTlsConnection(address.getHostName, address.getPort, sslContext, firstSession)
+
+      val chars = "hello\n".toList.map(_.toString)
+      val (connectionF, result) =
+        Source(chars).map(c ⇒ ByteString(c))
+          .concat(Source.maybe) // do not complete it from our side
+          .viaMat(connectionFlow)(Keep.right)
+          .map(_.utf8String)
+          .toMat(Sink.fold("")(_ + _))(Keep.both)
+          .run()
+
+      connectionF.futureValue
+      system.log.info(s"Client connected to ${address.getHostString}:${address.getPort}")
+
+      result.futureValue(PatienceConfiguration.Timeout(10.seconds)) should ===("hello")
+    }
+
+    def initSslMess() = {
+      // #setting-up-ssl-context
+      import akka.stream.TLSClientAuth
+      import akka.stream.TLSProtocol
+      import com.typesafe.sslconfig.akka.AkkaSSLConfig
+      import java.security.KeyStore
+      import javax.net.ssl._
+
+      val sslConfig = AkkaSSLConfig()
+
+      // Don't hardcode your password in actual code
+      val password = "abcdef".toCharArray
+
+      // trust store and keys in one keystore
+      val keyStore = KeyStore.getInstance("PKCS12")
+      keyStore.load(classOf[TcpSpec].getResourceAsStream("/tcp-spec-keystore.p12"), password)
+
+      val tmf = TrustManagerFactory.getInstance("SunX509")
+      tmf.init(keyStore)
+
+      val keyManagerFactory = KeyManagerFactory.getInstance("SunX509")
+      keyManagerFactory.init(keyStore, password)
+
+      // initial ssl context
+      val sslContext = SSLContext.getInstance("TLS")
+      sslContext.init(keyManagerFactory.getKeyManagers, tmf.getTrustManagers, new SecureRandom)
+
+      // protocols
+      val defaultParams = sslContext.getDefaultSSLParameters
+      val defaultProtocols = defaultParams.getProtocols
+      val protocols = sslConfig.configureProtocols(defaultProtocols, sslConfig.config)
+      defaultParams.setProtocols(protocols)
+
+      // ciphers
+      val defaultCiphers = defaultParams.getCipherSuites
+      val cipherSuites = sslConfig.configureCipherSuites(defaultCiphers, sslConfig.config)
+      defaultParams.setCipherSuites(cipherSuites)
+
+      val negotiateNewSession = TLSProtocol.NegotiateNewSession
+        .withCipherSuites(cipherSuites: _*)
+        .withProtocols(protocols: _*)
+        .withParameters(defaultParams)
+        .withClientAuth(TLSClientAuth.None)
+
+      // #setting-up-ssl-context
+
+      (sslContext, negotiateNewSession)
+    }
+
   }
 
   def validateServerClientCommunication(

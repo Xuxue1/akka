@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2014-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2014-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.tck
 
 import java.util.concurrent.Executors
@@ -18,7 +19,7 @@ abstract class AkkaIdentityProcessorVerification[T](env: TestEnvironment, publis
   with TestNGSuiteLike with ActorSystemLifecycle {
 
   def this(printlnDebug: Boolean) =
-    this(new TestEnvironment(Timeouts.defaultTimeoutMillis, printlnDebug), Timeouts.publisherShutdownTimeoutMillis)
+    this(new TestEnvironment(Timeouts.defaultTimeoutMillis, Timeouts.defaultNoSignalsTimeoutMillis, printlnDebug), Timeouts.publisherShutdownTimeoutMillis)
 
   def this() = this(false)
 

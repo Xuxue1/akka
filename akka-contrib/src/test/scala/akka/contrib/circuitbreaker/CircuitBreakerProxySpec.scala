@@ -1,14 +1,14 @@
-/**
- * Copyright (C) 2014-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2014-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.contrib.circuitbreaker
 
 import akka.actor.{ ActorRef, PoisonPill }
 import akka.contrib.circuitbreaker.CircuitBreakerProxy._
 import akka.testkit.{ AkkaSpec, TestProbe }
 import akka.util.Timeout
-import org.scalatest.time.{ Millis, Second, Span }
-import org.scalatest.{ GivenWhenThen, Matchers }
+import org.scalatest.GivenWhenThen
 
 import scala.concurrent.duration._
 import scala.language.postfixOps
@@ -21,8 +21,8 @@ class CircuitBreakerProxySpec extends AkkaSpec() with GivenWhenThen {
       callTimeout = 200 millis,
       resetTimeout = 1 second,
       failureDetector = {
-      _ == "FAILURE"
-    })
+        _ == "FAILURE"
+      })
 
   trait CircuitBreakerScenario {
     val sender = TestProbe()

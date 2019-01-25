@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.impl.fusing
 
 import akka.stream.Attributes
@@ -12,7 +13,6 @@ import akka.stream.testkit.Utils.TE
 import scala.concurrent.duration._
 
 class LifecycleInterpreterSpec extends StreamSpec with GraphInterpreterSpecKit {
-  import akka.stream.Supervision._
 
   "Interpreter" must {
 
@@ -225,3 +225,4 @@ class LifecycleInterpreterSpec extends StreamSpec with GraphInterpreterSpecKit {
     override def toString = "PushFinish"
   }
 }
+

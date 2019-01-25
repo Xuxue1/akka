@@ -1,8 +1,13 @@
+/*
+ * Copyright (C) 2018-2019 Lightbend Inc. <https://www.lightbend.com>
+ */
+
 package akka.dispatch
 
 import java.util.concurrent.{ ExecutorService, Executor, Executors }
 import java.util.concurrent.atomic.AtomicInteger
-import scala.concurrent._
+import scala.concurrent.{ ExecutionContext, ExecutionContextExecutor, ExecutionContextExecutorService }
+import scala.concurrent.{ Await, blocking, Promise, Future }
 import scala.concurrent.duration._
 import akka.testkit.{ TestLatch, AkkaSpec, DefaultTimeout }
 import akka.util.SerializedSuspendableExecutionContext
@@ -209,8 +214,8 @@ class ExecutionContextSpec extends AkkaSpec with DefaultTimeout {
       val submissions = new AtomicInteger(0)
       val counter = new AtomicInteger(0)
       val underlying = new ExecutionContext {
-        override def execute(r: Runnable) { submissions.incrementAndGet(); ExecutionContext.global.execute(r) }
-        override def reportFailure(t: Throwable) { ExecutionContext.global.reportFailure(t) }
+        override def execute(r: Runnable): Unit = { submissions.incrementAndGet(); ExecutionContext.global.execute(r) }
+        override def reportFailure(t: Throwable): Unit = { ExecutionContext.global.reportFailure(t) }
       }
       val throughput = 25
       val sec = SerializedSuspendableExecutionContext(throughput)(underlying)
@@ -241,8 +246,8 @@ class ExecutionContextSpec extends AkkaSpec with DefaultTimeout {
       val submissions = new AtomicInteger(0)
       val counter = new AtomicInteger(0)
       val underlying = new ExecutionContext {
-        override def execute(r: Runnable) { submissions.incrementAndGet(); ExecutionContext.global.execute(r) }
-        override def reportFailure(t: Throwable) { ExecutionContext.global.reportFailure(t) }
+        override def execute(r: Runnable): Unit = { submissions.incrementAndGet(); ExecutionContext.global.execute(r) }
+        override def reportFailure(t: Throwable): Unit = { ExecutionContext.global.reportFailure(t) }
       }
       val throughput = 25
       val sec = SerializedSuspendableExecutionContext(throughput)(underlying)

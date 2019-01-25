@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.dispatch
 
 import java.util.concurrent._
@@ -17,7 +18,7 @@ import com.typesafe.config.Config
 
 import scala.annotation.tailrec
 import scala.concurrent.duration.{ Duration, FiniteDuration }
-import scala.concurrent.forkjoin.ForkJoinTask
+import akka.dispatch.forkjoin.ForkJoinTask
 import scala.util.control.NonFatal
 
 /**
@@ -232,7 +233,7 @@ private[akka] abstract class Mailbox(val messageQueue: MessageQueue)
   override final def getRawResult(): Unit = ()
   override final def setRawResult(unit: Unit): Unit = ()
   final override def exec(): Boolean = try { run(); false } catch {
-    case ie: InterruptedException ⇒
+    case _: InterruptedException ⇒
       Thread.currentThread.interrupt()
       false
     case anything: Throwable ⇒
@@ -270,7 +271,7 @@ private[akka] abstract class Mailbox(val messageQueue: MessageQueue)
    * becomes closed (because of processing a Terminate message), dump all
    * already dequeued message to deadLetters.
    */
-  final def processAllSystemMessages() {
+  final def processAllSystemMessages(): Unit = {
     var interruption: Throwable = null
     var messageList = systemDrain(SystemMessageList.LNil)
     while ((messageList.nonEmpty) && !isClosed) {
@@ -908,7 +909,7 @@ object BoundedControlAwareMailbox {
       }
     }
 
-    private def signalNotFull() {
+    private def signalNotFull(): Unit = {
       putLock.lock()
 
       try {
@@ -918,7 +919,7 @@ object BoundedControlAwareMailbox {
       }
     }
 
-    private final def enqueueWithTimeout(q: Queue[Envelope], receiver: ActorRef, envelope: Envelope) {
+    private final def enqueueWithTimeout(q: Queue[Envelope], receiver: ActorRef, envelope: Envelope): Unit = {
       var remaining = pushTimeOut.toNanos
 
       putLock.lockInterruptibly()

@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.persistence
@@ -10,6 +10,7 @@ import akka.actor.{ ActorRef, Props }
 import akka.event.Logging
 import akka.persistence.snapshot.local.LocalSnapshotStore
 import akka.testkit.{ EventFilter, ImplicitSender, TestEvent }
+import com.typesafe.config.Config
 
 import scala.concurrent.Future
 import scala.concurrent.duration._
@@ -71,17 +72,17 @@ object SnapshotFailureRobustnessSpec {
     }
   }
 
-  class FailingLocalSnapshotStore extends LocalSnapshotStore {
+  class FailingLocalSnapshotStore(config: Config) extends LocalSnapshotStore(config) {
     override def save(metadata: SnapshotMetadata, snapshot: Any): Unit = {
       if (metadata.sequenceNr == 2 || snapshot == "boom") {
-        val bytes = "b0rk".getBytes("UTF-8")
+        val bytes = "b0rkb0rk".getBytes("UTF-8") // length >= 8 to prevent EOF exception
         val tmpFile = withOutputStream(metadata)(_.write(bytes))
         tmpFile.renameTo(snapshotFileForWrite(metadata))
       } else super.save(metadata, snapshot)
     }
   }
 
-  class DeleteFailingLocalSnapshotStore extends LocalSnapshotStore {
+  class DeleteFailingLocalSnapshotStore(config: Config) extends LocalSnapshotStore(config) {
     override def deleteAsync(metadata: SnapshotMetadata): Future[Unit] = {
       super.deleteAsync(metadata) // we actually delete it properly, but act as if it failed
       Future.failed(new IOException("Failed to delete snapshot for some reason!"))
@@ -95,9 +96,10 @@ object SnapshotFailureRobustnessSpec {
 }
 
 class SnapshotFailureRobustnessSpec extends PersistenceSpec(PersistenceSpec.config("leveldb", "SnapshotFailureRobustnessSpec", serialization = "off", extraConfig = Some(
-  """
-  akka.persistence.snapshot-store.local.class = "akka.persistence.SnapshotFailureRobustnessSpec$FailingLocalSnapshotStore"
-  akka.persistence.snapshot-store.local-delete-fail.class = "akka.persistence.SnapshotFailureRobustnessSpec$DeleteFailingLocalSnapshotStore"
+  s"""
+  akka.persistence.snapshot-store.local.class = "akka.persistence.SnapshotFailureRobustnessSpec$$FailingLocalSnapshotStore"
+  akka.persistence.snapshot-store.local-delete-fail = $${akka.persistence.snapshot-store.local}
+  akka.persistence.snapshot-store.local-delete-fail.class = "akka.persistence.SnapshotFailureRobustnessSpec$$DeleteFailingLocalSnapshotStore"
   """))) with ImplicitSender {
 
   import SnapshotFailureRobustnessSpec._

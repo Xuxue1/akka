@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.persistence.journal.leveldb
 
 import akka.persistence.journal.AsyncWriteTarget
@@ -10,6 +11,7 @@ import scala.util.Success
 import scala.util.Failure
 import scala.util.control.NonFatal
 import akka.persistence.AtomicWrite
+import com.typesafe.config.Config
 import scala.concurrent.Future
 
 /**
@@ -17,11 +19,17 @@ import scala.concurrent.Future
  * set for each actor system that uses the store via `SharedLeveldbJournal.setStore`. The
  * shared LevelDB store is for testing only.
  */
-class SharedLeveldbStore extends { val configPath = "akka.persistence.journal.leveldb-shared.store" } with LeveldbStore {
+class SharedLeveldbStore(cfg: Config) extends LeveldbStore {
   import AsyncWriteTarget._
   import context.dispatcher
 
-  def receive = {
+  def this() = this(LeveldbStore.emptyConfig)
+
+  override def prepareConfig: Config =
+    if (cfg ne LeveldbStore.emptyConfig) cfg.getConfig("store")
+    else context.system.settings.config.getConfig("akka.persistence.journal.leveldb-shared.store")
+
+  def receive = receiveCompactionInternal orElse {
     case WriteMessages(messages) ⇒
       // TODO it would be nice to DRY this with AsyncWriteJournal, but this is using
       //      AsyncWriteProxy message protocol

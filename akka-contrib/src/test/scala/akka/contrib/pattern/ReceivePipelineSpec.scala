@@ -1,3 +1,7 @@
+/*
+ * Copyright (C) 2018-2019 Lightbend Inc. <https://www.lightbend.com>
+ */
+
 package akka.contrib.pattern
 
 import akka.actor.{ Actor, Props }
@@ -246,7 +250,7 @@ class PersistentReceivePipelineSpec(config: Config) extends AkkaSpec(config) wit
           override def unhandled(message: Any) = probeRef ! message
         }))
 
-      // 11 ( -> not handled by EvenHalverInterceptor) -> 22 but > 10 so not handled in main receive: 
+      // 11 ( -> not handled by EvenHalverInterceptor) -> 22 but > 10 so not handled in main receive:
       // original message falls back to unhandled implementation...
       replier ! 11
       probe.expectMsg(11)

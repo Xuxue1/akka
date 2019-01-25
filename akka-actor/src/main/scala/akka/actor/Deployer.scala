@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.actor
@@ -140,11 +140,11 @@ private[akka] class Deployer(val settings: ActorSystem.Settings, val dynamicAcce
       case (key, value: String) ⇒ (key → value)
     }.toMap
 
-  config.root.asScala flatMap {
+  config.root.asScala.map {
     case ("default", _)             ⇒ None
     case (key, value: ConfigObject) ⇒ parseConfig(key, value.toConfig)
     case _                          ⇒ None
-  } foreach deploy
+  }.flatten foreach deploy
 
   def lookup(path: ActorPath): Option[Deploy] = lookup(path.elements.drop(1))
 
@@ -153,7 +153,7 @@ private[akka] class Deployer(val settings: ActorSystem.Settings, val dynamicAcce
   def deploy(d: Deploy): Unit = {
     @tailrec def add(path: Array[String], d: Deploy, w: WildcardIndex[Deploy] = deployments.get): Unit = {
       for (i ← path.indices) path(i) match {
-        case "" ⇒ throw new InvalidActorNameException(s"Actor name in deployment [${d.path}] must not be empty")
+        case "" ⇒ throw InvalidActorNameException(s"Actor name in deployment [${d.path}] must not be empty")
         case el ⇒ ActorPath.validatePathElement(el, fullPath = d.path)
       }
 
@@ -203,7 +203,7 @@ private[akka] class Deployer(val settings: ActorSystem.Settings, val dynamicAcce
         case e: NoSuchMethodException ⇒
           dynamicAccess.createInstanceFor[RouterConfig](fqn, args2).recover({
             case e @ (_: IllegalArgumentException | _: ConfigException) ⇒ throw e
-            case e2 ⇒ throwCannotInstantiateRouter(args2, e)
+            case _ ⇒ throwCannotInstantiateRouter(args2, e)
           }).get
         case e ⇒ throwCannotInstantiateRouter(args2, e)
       }).get

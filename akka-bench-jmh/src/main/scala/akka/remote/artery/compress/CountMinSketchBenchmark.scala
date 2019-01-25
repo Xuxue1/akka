@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2016-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.remote.artery.compress
 
 import java.util.Random
@@ -31,7 +32,7 @@ class CountMinSketchBenchmark {
   @Setup
   def init(): Unit = {
     countMinSketch = new CountMinSketch(d, w, seed)
-    (0 to 8191).foreach { index =>
+    (0 to 8191).foreach { index ⇒
       preallocateIds(index) = rand.nextInt()
       preallocateValues(index) = Math.abs(rand.nextInt())
     }
@@ -40,7 +41,7 @@ class CountMinSketchBenchmark {
   @Benchmark
   @OperationsPerInvocation(8192)
   def updateRandomNumbers(blackhole: Blackhole): Unit = {
-    var i: Int = 0;
+    var i: Int = 0
     while (i < 8192) {
       blackhole.consume(countMinSketch.addObjectAndEstimateCount(preallocateIds(i), preallocateValues(i)))
       i += 1

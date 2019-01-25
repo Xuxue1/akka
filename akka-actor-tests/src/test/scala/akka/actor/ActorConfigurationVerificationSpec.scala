@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.actor
 
 import language.postfixOps
@@ -36,7 +37,7 @@ object ActorConfigurationVerificationSpec {
 class ActorConfigurationVerificationSpec extends AkkaSpec(ActorConfigurationVerificationSpec.config) with DefaultTimeout with BeforeAndAfterEach {
   import ActorConfigurationVerificationSpec._
 
-  override def atStartup {
+  override def atStartup: Unit = {
     system.eventStream.publish(Mute(EventFilter[ConfigurationException]("")))
   }
 

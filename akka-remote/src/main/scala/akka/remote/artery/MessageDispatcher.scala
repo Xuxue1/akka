@@ -1,19 +1,18 @@
-/**
- * Copyright (C) 2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2016-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.remote.artery
 
 import akka.actor.ActorRef
 import akka.actor.ActorSelection
 import akka.actor.ActorSelectionMessage
-import akka.actor.Address
 import akka.actor.ExtendedActorSystem
-import akka.actor.InternalActorRef
 import akka.actor.LocalRef
 import akka.actor.PossiblyHarmful
 import akka.actor.RepointableRef
 import akka.dispatch.sysmsg.SystemMessage
-import akka.event.{ LogMarker, Logging, LoggingReceive }
+import akka.event.{ LogMarker, Logging }
 import akka.remote.RemoteActorRefProvider
 import akka.remote.RemoteRef
 import akka.util.OptionVal
@@ -29,17 +28,19 @@ private[remote] class MessageDispatcher(
   private val log = Logging.withMarker(system, getClass.getName)
   private val debugLogEnabled = log.isDebugEnabled
 
-  def dispatch(
-    recipient:     InternalActorRef,
-    message:       AnyRef,
-    senderOption:  OptionVal[ActorRef],
-    originAddress: OptionVal[Address]): Unit = {
-
+  def dispatch(inboundEnvelope: InboundEnvelope): Unit = {
     import provider.remoteSettings.Artery._
     import Logging.messageClassName
 
+    val recipient = inboundEnvelope.recipient.get
+    val message = inboundEnvelope.message
+    val senderOption = inboundEnvelope.sender
+    val originAddress = inboundEnvelope.association match {
+      case OptionVal.Some(a) ⇒ OptionVal.Some(a.remoteAddress)
+      case OptionVal.None    ⇒ OptionVal.None
+    }
+
     val sender: ActorRef = senderOption.getOrElse(system.deadLetters)
-    val originalReceiver = recipient.path
 
     recipient match {
 
@@ -52,14 +53,14 @@ private[remote] class MessageDispatcher(
         } else {
           if (LogReceive && debugLogEnabled) log.debug(
             "received daemon message [{}] from [{}]",
-            messageClassName(message), senderOption.getOrElse(originAddress.getOrElse("")))
+            message, senderOption.getOrElse(originAddress.getOrElse("")))
           remoteDaemon ! message
         }
 
       case l @ (_: LocalRef | _: RepointableRef) if l.isLocal ⇒
         if (LogReceive && debugLogEnabled) log.debug(
           "received message [{}] to [{}] from [{}]",
-          messageClassName(message), recipient, senderOption.getOrElse(""))
+          message, recipient, senderOption.getOrElse(""))
         message match {
           case sel: ActorSelectionMessage ⇒
             if (UntrustedMode && (!TrustedSelectionPaths.contains(sel.elements.mkString("/", "/", "")) ||
@@ -84,7 +85,7 @@ private[remote] class MessageDispatcher(
       case r @ (_: RemoteRef | _: RepointableRef) if !r.isLocal && !UntrustedMode ⇒
         if (LogReceive && debugLogEnabled) log.debug(
           "received remote-destined message [{}] to [{}] from [{}]",
-          messageClassName(message), recipient, senderOption.getOrElse(originAddress.getOrElse("")))
+          message, recipient, senderOption.getOrElse(originAddress.getOrElse("")))
         // if it was originally addressed to us but is in fact remote from our point of view (i.e. remote-deployed)
         r.!(message)(sender)
 

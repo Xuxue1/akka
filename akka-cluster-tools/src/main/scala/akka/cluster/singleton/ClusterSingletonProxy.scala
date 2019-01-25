@@ -1,11 +1,11 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.cluster.singleton
 
 import akka.actor._
-import akka.cluster.{ MemberStatus, Cluster, Member }
+import akka.cluster.{ Cluster, Member, MemberStatus }
 import scala.collection.immutable
 import akka.cluster.ClusterEvent._
 import akka.cluster.ClusterEvent.MemberRemoved
@@ -18,6 +18,9 @@ import scala.language.postfixOps
 import com.typesafe.config.Config
 import akka.actor.NoSerializationVerificationNeeded
 import akka.event.Logging
+import akka.util.MessageBuffer
+import akka.cluster.ClusterSettings
+import akka.cluster.ClusterSettings.DataCenter
 
 object ClusterSingletonProxySettings {
 
@@ -62,6 +65,7 @@ object ClusterSingletonProxySettings {
 /**
  * @param singletonName The actor name of the singleton actor that is started by the [[ClusterSingletonManager]].
  * @param role The role of the cluster nodes where the singleton can be deployed. If None, then any node will do.
+ * @param dataCenter The data center of the cluster nodes where the singleton is running. If None then the same data center as current node.
  * @param singletonIdentificationInterval Interval at which the proxy will try to resolve the singleton instance.
  * @param bufferSize If the location of the singleton is unknown the proxy will buffer this number of messages
  *   and deliver them when the singleton is identified. When the buffer is full old messages will be dropped
@@ -71,8 +75,17 @@ object ClusterSingletonProxySettings {
 final class ClusterSingletonProxySettings(
   val singletonName:                   String,
   val role:                            Option[String],
+  val dataCenter:                      Option[DataCenter],
   val singletonIdentificationInterval: FiniteDuration,
   val bufferSize:                      Int) extends NoSerializationVerificationNeeded {
+
+  // for backwards compatibility
+  def this(
+    singletonName:                   String,
+    role:                            Option[String],
+    singletonIdentificationInterval: FiniteDuration,
+    bufferSize:                      Int) =
+    this(singletonName, role, None, singletonIdentificationInterval, bufferSize)
 
   require(bufferSize >= 0 && bufferSize <= 10000, "bufferSize must be >= 0 and <= 10000")
 
@@ -82,6 +95,10 @@ final class ClusterSingletonProxySettings(
 
   def withRole(role: Option[String]): ClusterSingletonProxySettings = copy(role = role)
 
+  def withDataCenter(dataCenter: DataCenter): ClusterSingletonProxySettings = copy(dataCenter = Some(dataCenter))
+
+  def withDataCenter(dataCenter: Option[DataCenter]): ClusterSingletonProxySettings = copy(dataCenter = dataCenter)
+
   def withSingletonIdentificationInterval(singletonIdentificationInterval: FiniteDuration): ClusterSingletonProxySettings =
     copy(singletonIdentificationInterval = singletonIdentificationInterval)
 
@@ -89,11 +106,12 @@ final class ClusterSingletonProxySettings(
     copy(bufferSize = bufferSize)
 
   private def copy(
-    singletonName:                   String         = singletonName,
-    role:                            Option[String] = role,
-    singletonIdentificationInterval: FiniteDuration = singletonIdentificationInterval,
-    bufferSize:                      Int            = bufferSize): ClusterSingletonProxySettings =
-    new ClusterSingletonProxySettings(singletonName, role, singletonIdentificationInterval, bufferSize)
+    singletonName:                   String             = singletonName,
+    role:                            Option[String]     = role,
+    dataCenter:                      Option[DataCenter] = dataCenter,
+    singletonIdentificationInterval: FiniteDuration     = singletonIdentificationInterval,
+    bufferSize:                      Int                = bufferSize): ClusterSingletonProxySettings =
+    new ClusterSingletonProxySettings(singletonName, role, dataCenter, singletonIdentificationInterval, bufferSize)
 }
 
 object ClusterSingletonProxy {
@@ -107,7 +125,7 @@ object ClusterSingletonProxy {
   def props(singletonManagerPath: String, settings: ClusterSingletonProxySettings): Props =
     Props(new ClusterSingletonProxy(singletonManagerPath, settings)).withDeploy(Deploy.local)
 
-  private case object TryToIdentifySingleton
+  private case object TryToIdentifySingleton extends NoSerializationVerificationNeeded
 
 }
 
@@ -143,7 +161,7 @@ final class ClusterSingletonProxy(singletonManagerPath: String, settings: Cluste
   val ageOrdering = Member.ageOrdering
   var membersByAge: immutable.SortedSet[Member] = immutable.SortedSet.empty(ageOrdering)
 
-  var buffer = new java.util.LinkedList[(Any, ActorRef)]
+  var buffer: MessageBuffer = MessageBuffer.empty
 
   // subscribe to MemberEvent, re-subscribe when restart
   override def preStart(): Unit = {
@@ -156,15 +174,18 @@ final class ClusterSingletonProxy(singletonManagerPath: String, settings: Cluste
     cluster.unsubscribe(self)
   }
 
-  def cancelTimer() = {
+  def cancelTimer(): Unit = {
     identifyTimer.foreach(_.cancel())
     identifyTimer = None
   }
 
-  def matchingRole(member: Member): Boolean = role match {
-    case None    ⇒ true
-    case Some(r) ⇒ member.hasRole(r)
+  private val targetDcRole = settings.dataCenter match {
+    case Some(t) ⇒ ClusterSettings.DcRolePrefix + t
+    case None    ⇒ ClusterSettings.DcRolePrefix + cluster.settings.SelfDataCenter
   }
+
+  def matchingRole(member: Member): Boolean =
+    member.hasRole(targetDcRole) && role.forall(member.hasRole)
 
   def handleInitial(state: CurrentClusterState): Unit = {
     trackChange {
@@ -178,7 +199,7 @@ final class ClusterSingletonProxy(singletonManagerPath: String, settings: Cluste
   /**
    * Discard old singleton ActorRef and send a periodic message to self to identify the singleton.
    */
-  def identifySingleton() {
+  def identifySingleton(): Unit = {
     import context.dispatcher
     log.debug("Creating singleton identification timer...")
     identifyCounter += 1
@@ -203,7 +224,8 @@ final class ClusterSingletonProxy(singletonManagerPath: String, settings: Cluste
   def add(m: Member): Unit = {
     if (matchingRole(m))
       trackChange { () ⇒
-        membersByAge -= m // replace
+        // replace, it's possible that the upNumber is changed
+        membersByAge = membersByAge.filterNot(_.uniqueAddress == m.uniqueAddress)
         membersByAge += m
       }
   }
@@ -214,16 +236,22 @@ final class ClusterSingletonProxy(singletonManagerPath: String, settings: Cluste
    */
   def remove(m: Member): Unit = {
     if (matchingRole(m))
-      trackChange {
-        () ⇒ membersByAge -= m
+      trackChange { () ⇒
+        // filter, it's possible that the upNumber is changed
+        membersByAge = membersByAge.filterNot(_.uniqueAddress == m.uniqueAddress)
       }
   }
 
   def receive = {
     // cluster logic
     case state: CurrentClusterState ⇒ handleInitial(state)
-    case MemberUp(m) ⇒ add(m)
-    case mEvent: MemberEvent if mEvent.isInstanceOf[MemberExited] || mEvent.isInstanceOf[MemberRemoved] ⇒ remove(mEvent.member)
+    case MemberUp(m)                ⇒ add(m)
+    case MemberExited(m)            ⇒ remove(m)
+    case MemberRemoved(m, _) ⇒
+      if (m.uniqueAddress == cluster.selfUniqueAddress)
+        context.stop(self)
+      else
+        remove(m)
     case _: MemberEvent ⇒ // do nothing
 
     // singleton identification logic
@@ -235,15 +263,19 @@ final class ClusterSingletonProxy(singletonManagerPath: String, settings: Cluste
       cancelTimer()
       sendBuffered()
     case _: ActorIdentity ⇒ // do nothing
-    case ClusterSingletonProxy.TryToIdentifySingleton if identifyTimer.isDefined ⇒
-      membersByAge.headOption.foreach {
-        oldest ⇒
-          val singletonAddress = RootActorPath(oldest.address) / singletonPath
-          log.debug("Trying to identify singleton at [{}]", singletonAddress)
-          context.actorSelection(singletonAddress) ! Identify(identifyId)
+    case ClusterSingletonProxy.TryToIdentifySingleton ⇒
+      identifyTimer match {
+        case Some(_) ⇒
+          membersByAge.headOption foreach { oldest ⇒
+            val singletonAddress = RootActorPath(oldest.address) / singletonPath
+            log.debug("Trying to identify singleton at [{}]", singletonAddress)
+            context.actorSelection(singletonAddress) ! Identify(identifyId)
+          }
+        case _ ⇒
+        // ignore, if the timer is not present it means we have successfully identified
       }
     case Terminated(ref) ⇒
-      if (singleton.exists(_ == ref)) {
+      if (singleton.contains(ref)) {
         // buffering mode, identification of new will start when old node is removed
         singleton = None
       }
@@ -254,8 +286,8 @@ final class ClusterSingletonProxy(singletonManagerPath: String, settings: Cluste
         case Some(s) ⇒
           if (log.isDebugEnabled)
             log.debug(
-              "Forwarding message of type [{}] to current singleton instance at [{}]: {}",
-              Logging.simpleName(msg.getClass.getName), s.path)
+              "Forwarding message of type [{}] to current singleton instance at [{}]",
+              Logging.simpleName(msg.getClass), s.path)
           s forward msg
         case None ⇒
           buffer(msg)
@@ -266,20 +298,19 @@ final class ClusterSingletonProxy(singletonManagerPath: String, settings: Cluste
     if (settings.bufferSize == 0)
       log.debug("Singleton not available and buffering is disabled, dropping message [{}]", msg.getClass.getName)
     else if (buffer.size == settings.bufferSize) {
-      val (m, _) = buffer.removeFirst()
+      val (m, _) = buffer.head()
+      buffer.dropHead()
       log.debug("Singleton not available, buffer is full, dropping first message [{}]", m.getClass.getName)
-      buffer.addLast((msg, sender()))
+      buffer.append(msg, sender())
     } else {
       log.debug("Singleton not available, buffering message type [{}]", msg.getClass.getName)
-      buffer.addLast((msg, sender()))
+      buffer.append(msg, sender())
     }
 
   def sendBuffered(): Unit = {
     log.debug("Sending buffered messages to current singleton instance")
     val target = singleton.get
-    while (!buffer.isEmpty) {
-      val (msg, snd) = buffer.removeFirst()
-      target.tell(msg, snd)
-    }
+    buffer.foreach((msg, snd) ⇒ target.tell(msg, snd))
+    buffer = MessageBuffer.empty
   }
 }

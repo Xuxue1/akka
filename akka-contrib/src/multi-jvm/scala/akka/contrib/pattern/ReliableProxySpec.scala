@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.contrib.pattern
@@ -12,6 +12,7 @@ import org.scalatest.BeforeAndAfterEach
 import akka.remote.transport.ThrottlerTransportAdapter.Direction
 import akka.actor._
 import akka.testkit.ImplicitSender
+
 import scala.concurrent.duration._
 import akka.actor.FSM
 import akka.actor.ActorRef
@@ -35,7 +36,7 @@ class ReliableProxySpec extends MultiNodeSpec(ReliableProxySpec) with STMultiNod
 
   override def initialParticipants = roles.size
 
-  override def afterEach() {
+  override def afterEach(): Unit = {
     runOn(local) {
       testConductor.passThrough(local, remote, Direction.Both).await
     }

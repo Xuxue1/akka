@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.event
 
 import language.postfixOps
@@ -12,6 +13,7 @@ import org.scalatest.WordSpec
 import com.typesafe.config.ConfigFactory
 import scala.collection.JavaConverters._
 import akka.actor._
+import scala.annotation.tailrec
 
 object LoggingReceiveSpec {
   class TestLogActor extends Actor {
@@ -25,7 +27,7 @@ class LoggingReceiveSpec extends WordSpec with BeforeAndAfterAll {
 
   import LoggingReceiveSpec._
   val config = ConfigFactory.parseString("""
-    akka.loglevel=DEBUG
+    akka.loglevel=DEBUG # test verifies debug
     akka.actor.serialize-messages = off # debug noise from serialization
     """).withFallback(AkkaSpec.testConf)
   val appLogging = ActorSystem("logging", ConfigFactory.parseMap(Map("akka.actor.debug.receive" → true).asJava).withFallback(config))
@@ -41,13 +43,13 @@ class LoggingReceiveSpec extends WordSpec with BeforeAndAfterAll {
   appAuto.eventStream.publish(filter)
   appLifecycle.eventStream.publish(filter)
 
-  def ignoreMute(t: TestKit) {
+  def ignoreMute(t: TestKit): Unit = {
     t.ignoreMsg {
       case (_: TestEvent.Mute | _: TestEvent.UnMute) ⇒ true
     }
   }
 
-  override def afterAll() {
+  override def afterAll(): Unit = {
     TestKit.shutdownActorSystem(appLogging)
     TestKit.shutdownActorSystem(appAuto)
     TestKit.shutdownActorSystem(appLifecycle)
@@ -229,29 +231,27 @@ class LoggingReceiveSpec extends WordSpec with BeforeAndAfterAll {
           val sname = supervisor.path.toString
           val sclass = classOf[TestLogActor]
 
-          fishForMessage(hint = "started") {
-            case Logging.Debug(`sname`, `sclass`, msg: String) if msg startsWith "started" ⇒ true
-            case _ ⇒ false
+          expectMsgAllPF(messages = 2) {
+            case Logging.Debug(`sname`, `sclass`, msg: String) if msg startsWith "started" ⇒ 0
+            case Logging.Debug(_, _, msg: String) if msg startsWith "now supervising"      ⇒ 1
           }
 
           val actor = TestActorRef[TestLogActor](Props[TestLogActor], supervisor, "none")
           val aname = actor.path.toString
           val aclass = classOf[TestLogActor]
 
-          fishForMessage(hint = "started") {
-            case Logging.Debug(`aname`, `aclass`, msg: String) if msg startsWith "started" ⇒ true
-            case _ ⇒ false
+          expectMsgAllPF(messages = 2) {
+            case Logging.Debug(`aname`, `aclass`, msg: String) if msg.startsWith("started (" + classOf[TestLogActor].getName) ⇒ 0
+            case Logging.Debug(`sname`, `sclass`, msg: String) if msg == s"now supervising TestActor[$aname]"                 ⇒ 1
           }
 
           EventFilter[ActorKilledException](occurrences = 1) intercept {
             actor ! Kill
-            val set = receiveWhile(messages = 3) {
-              case Logging.Error(_: ActorKilledException, `aname`, _, "Kill") ⇒ 1
-              case Logging.Debug(`aname`, `aclass`, "restarting")             ⇒ 2
-              case Logging.Debug(`aname`, `aclass`, "restarted")              ⇒ 3
-            }.toSet
-            expectNoMsg(Duration.Zero)
-            assert(set == Set(1, 2, 3), set + " was not Set(1, 2, 3)")
+            expectMsgAllPF(messages = 3) {
+              case Logging.Error(_: ActorKilledException, `aname`, _, "Kill") ⇒ 0
+              case Logging.Debug(`aname`, `aclass`, "restarting")             ⇒ 1
+              case Logging.Debug(`aname`, `aclass`, "restarted")              ⇒ 2
+            }
           }
 
           system.stop(supervisor)
@@ -259,6 +259,25 @@ class LoggingReceiveSpec extends WordSpec with BeforeAndAfterAll {
             Logging.Debug(aname, aclass, "stopped"),
             Logging.Debug(sname, sclass, "stopping"),
             Logging.Debug(sname, sclass, "stopped"))
+        }
+
+        def expectMsgAllPF(messages: Int)(matchers: PartialFunction[AnyRef, Int]): Set[Int] = {
+          val max = remainingOrDefault
+          @tailrec def receiveNMatching(gotMatching: Set[Int], unknown: Vector[Any]): Set[Int] = {
+            if (unknown.size >= 20)
+              throw new IllegalStateException(s"Got too many unknown messages: [${unknown.mkString(", ")}]")
+            else if (gotMatching.size == messages) gotMatching
+            else {
+              val msg = receiveOne(remainingOrDefault)
+              assert(msg ne null, s"timeout ($max) during expectMsgAllPF, got matching " +
+                s"[${gotMatching.mkString(", ")}], got unknown: [${unknown.mkString(", ")}]")
+              if (matchers.isDefinedAt(msg)) receiveNMatching(gotMatching + matchers(msg), Vector.empty)
+              else receiveNMatching(gotMatching, unknown :+ msg) // unknown message, just ignore
+            }
+          }
+          val set = receiveNMatching(Set.empty, Vector.empty)
+          assert(set == (0 until messages).toSet)
+          set
         }
       }
     }

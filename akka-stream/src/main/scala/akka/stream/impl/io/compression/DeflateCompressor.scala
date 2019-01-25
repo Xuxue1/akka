@@ -1,19 +1,21 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.impl.io.compression
 
 import java.util.zip.Deflater
 
+import akka.annotation.InternalApi
 import akka.util.{ ByteString, ByteStringBuilder }
 
 import scala.annotation.tailrec
 
 /** INTERNAL API */
-private[akka] class DeflateCompressor extends Compressor {
+@InternalApi private[akka] class DeflateCompressor(level: Int = Deflater.BEST_COMPRESSION, nowrap: Boolean = false) extends Compressor {
   import DeflateCompressor._
 
-  protected lazy val deflater = new Deflater(Deflater.BEST_COMPRESSION, false)
+  protected lazy val deflater = new Deflater(level, nowrap)
 
   override final def compressAndFlush(input: ByteString): ByteString = {
     val buffer = newTempBuffer(input.size)
@@ -62,7 +64,7 @@ private[akka] class DeflateCompressor extends Compressor {
 }
 
 /** INTERNAL API */
-private[akka] object DeflateCompressor {
+@InternalApi private[akka] object DeflateCompressor {
   val MinBufferSize = 1024
 
   @tailrec

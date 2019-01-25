@@ -1,17 +1,19 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.impl.io.compression
 
 import akka.NotUsed
-import akka.stream.{ Attributes, FlowShape }
+import akka.annotation.InternalApi
+import akka.stream.Attributes
 import akka.stream.impl.fusing.GraphStages.SimpleLinearGraphStage
 import akka.stream.scaladsl.Flow
-import akka.stream.stage.{ GraphStage, GraphStageLogic, InHandler, OutHandler }
+import akka.stream.stage.{ GraphStageLogic, InHandler, OutHandler }
 import akka.util.ByteString
 
 /** INTERNAL API */
-private[stream] object CompressionUtils {
+@InternalApi private[stream] object CompressionUtils {
   /**
    * Creates a flow from a compressor constructor.
    */
@@ -22,7 +24,7 @@ private[stream] object CompressionUtils {
           val compressor = newCompressor()
 
           override def onPush(): Unit = {
-            val data = compressor.compress(grab(in))
+            val data = compressor.compressAndFlush(grab(in))
             if (data.nonEmpty) push(out, data)
             else pull(in)
           }

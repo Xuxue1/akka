@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.persistence
 
 import java.lang.{ Iterable ⇒ JIterable }
@@ -9,8 +10,10 @@ import akka.actor._
 import akka.japi.Procedure
 import akka.japi.Util
 import com.typesafe.config.Config
-
+import scala.collection.immutable
 import scala.util.control.NoStackTrace
+
+import akka.annotation.InternalApi
 
 abstract class RecoveryCompleted
 /**
@@ -96,9 +99,15 @@ object Recovery {
 
   /**
    * Convenience method for skipping recovery in [[PersistentActor]].
+   *
+   * It will still retrieve previously highest sequence number so that new events are persisted with
+   * higher sequence numbers rather than starting from 1 and assuming that there are no
+   * previous event with that sequence number.
+   *
    * @see [[Recovery]]
    */
-  val none: Recovery = Recovery(toSequenceNr = 0L)
+  val none: Recovery = Recovery(toSequenceNr = 0L, fromSnapshot = SnapshotSelectionCriteria.None)
+
 }
 
 final class RecoveryTimedOut(message: String) extends RuntimeException(message) with NoStackTrace
@@ -156,15 +165,139 @@ final class DiscardConfigurator extends StashOverflowStrategyConfigurator {
 }
 
 /**
- * An persistent Actor - can be used to implement command or event sourcing.
+ * Scala API: A persistent Actor - can be used to implement command or event sourcing.
  */
 trait PersistentActor extends Eventsourced with PersistenceIdentity {
   def receive = receiveCommand
+
+  /**
+   * Asynchronously persists `event`. On successful persistence, `handler` is called with the
+   * persisted event. It is guaranteed that no new commands will be received by a persistent actor
+   * between a call to `persist` and the execution of its `handler`. This also holds for
+   * multiple `persist` calls per received command. Internally, this is achieved by stashing new
+   * commands and unstashing them when the `event` has been persisted and handled. The stash used
+   * for that is an internal stash which doesn't interfere with the inherited user stash.
+   *
+   * An event `handler` may close over persistent actor state and modify it. The `sender` of a persisted
+   * event is the sender of the corresponding command. This means that one can reply to a command
+   * sender within an event `handler`.
+   *
+   * Within an event handler, applications usually update persistent actor state using persisted event
+   * data, notify listeners and reply to command senders.
+   *
+   * If persistence of an event fails, [[#onPersistFailure]] will be invoked and the actor will
+   * unconditionally be stopped. The reason that it cannot resume when persist fails is that it
+   * is unknown if the event was actually persisted or not, and therefore it is in an inconsistent
+   * state. Restarting on persistent failures will most likely fail anyway, since the journal
+   * is probably unavailable. It is better to stop the actor and after a back-off timeout start
+   * it again.
+   *
+   * @param event event to be persisted
+   * @param handler handler for each persisted `event`
+   */
+  def persist[A](event: A)(handler: A ⇒ Unit): Unit = {
+    internalPersist(event)(handler)
+  }
+
+  /**
+   * Asynchronously persists `events` in specified order. This is equivalent to calling
+   * `persist[A](event: A)(handler: A => Unit)` multiple times with the same `handler`,
+   * except that `events` are persisted atomically with this method.
+   *
+   * @param events events to be persisted
+   * @param handler handler for each persisted `events`
+   */
+  def persistAll[A](events: immutable.Seq[A])(handler: A ⇒ Unit): Unit = {
+    internalPersistAll(events)(handler)
+  }
+
+  /**
+   * Asynchronously persists `event`. On successful persistence, `handler` is called with the
+   * persisted event.
+   *
+   * Unlike `persist` the persistent actor will continue to receive incoming commands between the
+   * call to `persist` and executing it's `handler`. This asynchronous, non-stashing, version of
+   * of persist should be used when you favor throughput over the "command-2 only processed after
+   * command-1 effects' have been applied" guarantee, which is provided by the plain `persist` method.
+   *
+   * An event `handler` may close over persistent actor state and modify it. The `sender` of a persisted
+   * event is the sender of the corresponding command. This means that one can reply to a command
+   * sender within an event `handler`.
+   *
+   * If persistence of an event fails, [[#onPersistFailure]] will be invoked and the actor will
+   * unconditionally be stopped. The reason that it cannot resume when persist fails is that it
+   * is unknown if the event was actually persisted or not, and therefore it is in an inconsistent
+   * state. Restarting on persistent failures will most likely fail anyway, since the journal
+   * is probably unavailable. It is better to stop the actor and after a back-off timeout start
+   * it again.
+   *
+   * @param event event to be persisted
+   * @param handler handler for each persisted `event`
+   */
+  def persistAsync[A](event: A)(handler: A ⇒ Unit): Unit = {
+    internalPersistAsync(event)(handler)
+  }
+
+  /**
+   * Asynchronously persists `events` in specified order. This is equivalent to calling
+   * `persistAsync[A](event: A)(handler: A => Unit)` multiple times with the same `handler`,
+   * except that `events` are persisted atomically with this method.
+   *
+   * @param events events to be persisted
+   * @param handler handler for each persisted `events`
+   */
+  def persistAllAsync[A](events: immutable.Seq[A])(handler: A ⇒ Unit): Unit = {
+    internalPersistAllAsync(events)(handler)
+  }
+
+  /**
+   * Defer the handler execution until all pending handlers have been executed.
+   * Allows to define logic within the actor, which will respect the invocation-order-guarantee
+   * in respect to `persistAsync` or `persist` calls. That is, if `persistAsync` or `persist` was invoked before `deferAsync`,
+   * the corresponding handlers will be invoked in the same order as they were registered in.
+   *
+   * This call will NOT result in `event` being persisted, use `persist` or `persistAsync` instead
+   * if the given event should possible to replay.
+   *
+   * If there are no pending persist handler calls, the handler will be called immediately.
+   *
+   * If persistence of an earlier event fails, the persistent actor will stop, and the `handler`
+   * will not be run.
+   *
+   * @param event event to be handled in the future, when preceding persist operations have been processes
+   * @param handler handler for the given `event`
+   */
+  def deferAsync[A](event: A)(handler: A ⇒ Unit): Unit = {
+    internalDeferAsync(event)(handler)
+  }
+
+  /**
+   * Defer the handler execution until all pending handlers have been executed. It is guaranteed that no new commands
+   * will be received by a persistent actor between a call to `defer` and the execution of its `handler`.
+   * Allows to define logic within the actor, which will respect the invocation-order-guarantee
+   * in respect to `persistAsync` or `persist` calls. That is, if `persistAsync` or `persist` was invoked before `defer`,
+   * the corresponding handlers will be invoked in the same order as they were registered in.
+   *
+   * This call will NOT result in `event` being persisted, use `persist` or `persistAsync` instead
+   * if the given event should possible to replay.
+   *
+   * If there are no pending persist handler calls, the handler will be called immediately.
+   *
+   * If persistence of an earlier event fails, the persistent actor will stop, and the `handler`
+   * will not be run.
+   *
+   * @param event event to be handled in the future, when preceding persist operations have been processes
+   * @param handler handler for the given `event`
+   */
+  def defer[A](event: A)(handler: A ⇒ Unit): Unit = {
+    internalDefer(event)(handler)
+  }
 }
 
 /**
  * Java API: an persistent actor - can be used to implement command or event sourcing.
  */
+@deprecated("Use AbstractPersistentActor instead of UntypedPersistentActor.", since = "2.5.0")
 abstract class UntypedPersistentActor extends UntypedActor with Eventsourced with PersistenceIdentity {
 
   final def onReceive(message: Any) = onReceiveCommand(message)
@@ -194,7 +327,7 @@ abstract class UntypedPersistentActor extends UntypedActor with Eventsourced wit
    *
    * If persistence of an event fails, [[#onPersistFailure]] will be invoked and the actor will
    * unconditionally be stopped. The reason that it cannot resume when persist fails is that it
-   * is unknown if the even was actually persisted or not, and therefore it is in an inconsistent
+   * is unknown if the event was actually persisted or not, and therefore it is in an inconsistent
    * state. Restarting on persistent failures will most likely fail anyway, since the journal
    * is probably unavailable. It is better to stop the actor and after a back-off timeout start
    * it again.
@@ -203,7 +336,7 @@ abstract class UntypedPersistentActor extends UntypedActor with Eventsourced wit
    * @param handler handler for each persisted `event`
    */
   def persist[A](event: A, handler: Procedure[A]): Unit =
-    persist(event)(event ⇒ handler(event))
+    internalPersist(event)(event ⇒ handler(event))
 
   /**
    * Java API: asynchronously persists `events` in specified order. This is equivalent to calling
@@ -214,11 +347,7 @@ abstract class UntypedPersistentActor extends UntypedActor with Eventsourced wit
    * @param handler handler for each persisted `events`
    */
   def persistAll[A](events: JIterable[A], handler: Procedure[A]): Unit =
-    persistAll(Util.immutableSeq(events))(event ⇒ handler(event))
-
-  @deprecated("use persistAll instead", "2.4")
-  def persist[A](events: JIterable[A], handler: Procedure[A]): Unit =
-    persistAll(events, handler)
+    internalPersistAll(Util.immutableSeq(events))(event ⇒ handler(event))
 
   /**
    * JAVA API: asynchronously persists `event`. On successful persistence, `handler` is called with the
@@ -235,7 +364,7 @@ abstract class UntypedPersistentActor extends UntypedActor with Eventsourced wit
    *
    * If persistence of an event fails, [[#onPersistFailure]] will be invoked and the actor will
    * unconditionally be stopped. The reason that it cannot resume when persist fails is that it
-   * is unknown if the even was actually persisted or not, and therefore it is in an inconsistent
+   * is unknown if the event was actually persisted or not, and therefore it is in an inconsistent
    * state. Restarting on persistent failures will most likely fail anyway, since the journal
    * is probably unavailable. It is better to stop the actor and after a back-off timeout start
    * it again.
@@ -244,7 +373,7 @@ abstract class UntypedPersistentActor extends UntypedActor with Eventsourced wit
    * @param handler handler for each persisted `event`
    */
   def persistAsync[A](event: A)(handler: Procedure[A]): Unit =
-    super[Eventsourced].persistAsync(event)(event ⇒ handler(event))
+    internalPersistAsync(event)(event ⇒ handler(event))
 
   /**
    * JAVA API: asynchronously persists `events` in specified order. This is equivalent to calling
@@ -255,12 +384,12 @@ abstract class UntypedPersistentActor extends UntypedActor with Eventsourced wit
    * @param handler handler for each persisted `events`
    */
   def persistAllAsync[A](events: JIterable[A], handler: Procedure[A]): Unit =
-    super[Eventsourced].persistAllAsync(Util.immutableSeq(events))(event ⇒ handler(event))
+    internalPersistAllAsync(Util.immutableSeq(events))(event ⇒ handler(event))
 
   /**
    * Defer the handler execution until all pending handlers have been executed.
    * Allows to define logic within the actor, which will respect the invocation-order-guarantee
-   * in respect to `persistAsync` calls. That is, if `persistAsync` was invoked before defer,
+   * in respect to `persistAsync` or `persist` calls. That is, if `persistAsync` or `persist` was invoked before `deferAsync`,
    * the corresponding handlers will be invoked in the same order as they were registered in.
    *
    * This call will NOT result in `event` being persisted, please use `persist` or `persistAsync`,
@@ -275,7 +404,29 @@ abstract class UntypedPersistentActor extends UntypedActor with Eventsourced wit
    * @param handler handler for the given `event`
    */
   def deferAsync[A](event: A)(handler: Procedure[A]): Unit =
-    super[Eventsourced].deferAsync(event)(event ⇒ handler(event))
+    internalDeferAsync(event)(event ⇒ handler(event))
+
+  /**
+   * Defer the handler execution until all pending handlers have been executed. It is guaranteed that no new commands
+   * will be received by a persistent actor between a call to `defer` and the execution of its `handler`.
+   * Allows to define logic within the actor, which will respect the invocation-order-guarantee
+   * in respect to `persistAsync` or `persist` calls. That is, if `persistAsync` or `persist` was invoked before `defer`,
+   * the corresponding handlers will be invoked in the same order as they were registered in.
+   *
+   * This call will NOT result in `event` being persisted, use `persist` or `persistAsync` instead
+   * if the given event should possible to replay.
+   *
+   * If there are no pending persist handler calls, the handler will be called immediately.
+   *
+   * If persistence of an earlier event fails, the persistent actor will stop, and the `handler`
+   * will not be run.
+   *
+   * @param event event to be handled in the future, when preceding persist operations have been processes
+   * @param handler handler for the given `event`
+   */
+  def defer[A](event: A)(handler: Procedure[A]): Unit = {
+    internalDefer(event)(event ⇒ handler(event))
+  }
 
   /**
    * Java API: recovery handler that receives persisted events during recovery. If a state snapshot
@@ -306,7 +457,69 @@ abstract class UntypedPersistentActor extends UntypedActor with Eventsourced wit
 /**
  * Java API: an persistent actor - can be used to implement command or event sourcing.
  */
-abstract class AbstractPersistentActor extends AbstractActor with PersistentActor with Eventsourced {
+abstract class AbstractPersistentActor extends AbstractActor with AbstractPersistentActorLike {
+  /**
+   * Recovery handler that receives persisted events during recovery. If a state snapshot
+   * has been captured and saved, this handler will receive a [[SnapshotOffer]] message
+   * followed by events that are younger than the offered snapshot.
+   *
+   * This handler must not have side-effects other than changing persistent actor state i.e. it
+   * should not perform actions that may fail, such as interacting with external services,
+   * for example.
+   *
+   * If there is a problem with recovering the state of the actor from the journal, the error
+   * will be logged and the actor will be stopped.
+   *
+   * @see [[Recovery]]
+   */
+  def createReceiveRecover(): AbstractActor.Receive
+
+  /**
+   * An persistent actor has to define its initial receive behavior by implementing
+   * the `createReceive` method, also known as the command handler. Typically
+   * validates commands against current state (and/or by communication with other actors).
+   * On successful validation, one or more events are derived from a command and
+   * these events are then persisted by calling `persist`.
+   */
+  def createReceive(): AbstractActor.Receive
+
+  // Note that abstract methods createReceiveRecover and createReceive are also defined in
+  // AbstractPersistentActorLike. They were included here also for binary compatibility reasons.
+}
+
+/**
+ * INTERNAL API
+ */
+@InternalApi private[akka] trait AbstractPersistentActorLike extends Eventsourced {
+
+  /**
+   * Recovery handler that receives persisted events during recovery. If a state snapshot
+   * has been captured and saved, this handler will receive a [[SnapshotOffer]] message
+   * followed by events that are younger than the offered snapshot.
+   *
+   * This handler must not have side-effects other than changing persistent actor state i.e. it
+   * should not perform actions that may fail, such as interacting with external services,
+   * for example.
+   *
+   * If there is a problem with recovering the state of the actor from the journal, the error
+   * will be logged and the actor will be stopped.
+   *
+   * @see [[Recovery]]
+   */
+  def createReceiveRecover(): AbstractActor.Receive
+
+  override final def receiveRecover: Receive = createReceiveRecover().onMessage.asInstanceOf[Receive]
+
+  /**
+   * An persistent actor has to define its initial receive behavior by implementing
+   * the `createReceive` method, also known as the command handler. Typically
+   * validates commands against current state (and/or by communication with other actors).
+   * On successful validation, one or more events are derived from a command and
+   * these events are then persisted by calling `persist`.
+   */
+  def createReceive(): AbstractActor.Receive
+
+  override final def receiveCommand: Receive = createReceive().onMessage.asInstanceOf[Receive]
 
   /**
    * Java API: asynchronously persists `event`. On successful persistence, `handler` is called with the
@@ -325,7 +538,7 @@ abstract class AbstractPersistentActor extends AbstractActor with PersistentActo
    *
    * If persistence of an event fails, [[#onPersistFailure]] will be invoked and the actor will
    * unconditionally be stopped. The reason that it cannot resume when persist fails is that it
-   * is unknown if the even was actually persisted or not, and therefore it is in an inconsistent
+   * is unknown if the event was actually persisted or not, and therefore it is in an inconsistent
    * state. Restarting on persistent failures will most likely fail anyway, since the journal
    * is probably unavailable. It is better to stop the actor and after a back-off timeout start
    * it again.
@@ -334,7 +547,7 @@ abstract class AbstractPersistentActor extends AbstractActor with PersistentActo
    * @param handler handler for each persisted `event`
    */
   def persist[A](event: A, handler: Procedure[A]): Unit =
-    persist(event)(event ⇒ handler(event))
+    internalPersist(event)(event ⇒ handler(event))
 
   /**
    * Java API: asynchronously persists `events` in specified order. This is equivalent to calling
@@ -345,11 +558,7 @@ abstract class AbstractPersistentActor extends AbstractActor with PersistentActo
    * @param handler handler for each persisted `events`
    */
   def persistAll[A](events: JIterable[A], handler: Procedure[A]): Unit =
-    persistAll(Util.immutableSeq(events))(event ⇒ handler(event))
-
-  @deprecated("use persistAll instead", "2.4")
-  def persist[A](events: JIterable[A], handler: Procedure[A]): Unit =
-    persistAll(events, handler)
+    internalPersistAll(Util.immutableSeq(events))(event ⇒ handler(event))
 
   /**
    * Java API: asynchronously persists `event`. On successful persistence, `handler` is called with the
@@ -361,7 +570,7 @@ abstract class AbstractPersistentActor extends AbstractActor with PersistentActo
    *
    * If persistence of an event fails, [[#onPersistFailure]] will be invoked and the actor will
    * unconditionally be stopped. The reason that it cannot resume when persist fails is that it
-   * is unknown if the even was actually persisted or not, and therefore it is in an inconsistent
+   * is unknown if the event was actually persisted or not, and therefore it is in an inconsistent
    * state. Restarting on persistent failures will most likely fail anyway, since the journal
    * is probably unavailable. It is better to stop the actor and after a back-off timeout start
    * it again.
@@ -370,7 +579,7 @@ abstract class AbstractPersistentActor extends AbstractActor with PersistentActo
    * @param handler handler for each persisted `event`
    */
   def persistAsync[A](event: A, handler: Procedure[A]): Unit =
-    persistAsync(event)(event ⇒ handler(event))
+    internalPersistAsync(event)(event ⇒ handler(event))
 
   /**
    * Java API: asynchronously persists `events` in specified order. This is equivalent to calling
@@ -381,11 +590,7 @@ abstract class AbstractPersistentActor extends AbstractActor with PersistentActo
    * @param handler handler for each persisted `events`
    */
   def persistAllAsync[A](events: JIterable[A], handler: Procedure[A]): Unit =
-    persistAllAsync(Util.immutableSeq(events))(event ⇒ handler(event))
-
-  @deprecated("use persistAllAsync instead", "2.4")
-  def persistAsync[A](events: JIterable[A], handler: Procedure[A]): Unit =
-    persistAllAsync(events, handler)
+    internalPersistAllAsync(Util.immutableSeq(events))(event ⇒ handler(event))
 
   /**
    * Defer the handler execution until all pending handlers have been executed.
@@ -405,9 +610,33 @@ abstract class AbstractPersistentActor extends AbstractActor with PersistentActo
    * @param handler handler for the given `event`
    */
   def deferAsync[A](event: A)(handler: Procedure[A]): Unit =
-    super.deferAsync(event)(event ⇒ handler(event))
+    internalDeferAsync(event)(event ⇒ handler(event))
 
-  override def receive = super[PersistentActor].receive
+  /**
+   * Defer the handler execution until all pending handlers have been executed. It is guaranteed that no new commands
+   * will be received by a persistent actor between a call to `defer` and the execution of its `handler`.
+   * Allows to define logic within the actor, which will respect the invocation-order-guarantee
+   * in respect to `persistAsync` or `persist` calls. That is, if `persistAsync` or `persist` was invoked before `defer`,
+   * the corresponding handlers will be invoked in the same order as they were registered in.
+   *
+   * This call will NOT result in `event` being persisted, use `persist` or `persistAsync` instead
+   * if the given event should possible to replay.
+   *
+   * If there are no pending persist handler calls, the handler will be called immediately.
+   *
+   * If persistence of an earlier event fails, the persistent actor will stop, and the `handler`
+   * will not be run.
+   *
+   * @param event event to be handled in the future, when preceding persist operations have been processes
+   * @param handler handler for the given `event`
+   */
+  def defer[A](event: A)(handler: Procedure[A]): Unit = {
+    internalDefer(event)(event ⇒ handler(event))
+  }
 
 }
 
+/**
+ * Java API: Combination of [[AbstractPersistentActor]] and [[akka.actor.AbstractActorWithTimers]].
+ */
+abstract class AbstractPersistentActorWithTimers extends AbstractActor with Timers with AbstractPersistentActorLike

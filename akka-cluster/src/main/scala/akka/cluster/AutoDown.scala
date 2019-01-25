@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.cluster
 
 import akka.ConfigurationException
@@ -55,7 +56,7 @@ private[cluster] class AutoDown(autoDownUnreachableAfter: FiniteDuration)
   extends AutoDownBase(autoDownUnreachableAfter) with ActorLogging {
 
   val cluster = Cluster(context.system)
-  import cluster.InfoLogger._
+  import cluster.ClusterLogger._
 
   override def selfAddress = cluster.selfAddress
 
@@ -101,7 +102,7 @@ private[cluster] abstract class AutoDownBase(autoDownUnreachableAfter: FiniteDur
 
   import context.dispatcher
 
-  val skipMemberStatus = Gossip.convergenceSkipUnreachableWithMemberStatus
+  val skipMemberStatus = MembershipState.convergenceSkipUnreachableWithMemberStatus
 
   var scheduledUnreachable: Map[UniqueAddress, Cancellable] = Map.empty
   var pendingUnreachable: Set[UniqueAddress] = Set.empty

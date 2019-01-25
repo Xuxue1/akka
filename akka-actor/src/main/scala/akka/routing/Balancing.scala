@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.routing
 
 import scala.collection.immutable
@@ -66,7 +67,7 @@ private[akka] final class BalancingRoutingLogic extends RoutingLogic {
  */
 @SerialVersionUID(1L)
 final case class BalancingPool(
-  override val nrOfInstances:      Int,
+  val nrOfInstances:               Int,
   override val supervisorStrategy: SupervisorStrategy = Pool.defaultSupervisorStrategy,
   override val routerDispatcher:   String             = Dispatchers.DefaultDispatcherId)
   extends Pool {

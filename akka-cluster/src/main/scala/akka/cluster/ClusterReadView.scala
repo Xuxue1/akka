@@ -1,18 +1,18 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.cluster
 
-// TODO remove metrics 
-
 import java.io.Closeable
+
 import scala.collection.immutable
 import akka.actor.{ Actor, ActorRef, Address, Props }
 import akka.cluster.ClusterEvent._
 import akka.actor.PoisonPill
-import akka.dispatch.{ UnboundedMessageQueueSemantics, RequiresMessageQueue }
+import akka.dispatch.{ RequiresMessageQueue, UnboundedMessageQueueSemantics }
 import akka.actor.Deploy
+import akka.util.OptionVal
 
 /**
  * INTERNAL API
@@ -21,6 +21,7 @@ import akka.actor.Deploy
  * cluster events published on the event bus.
  */
 private[akka] class ClusterReadView(cluster: Cluster) extends Closeable {
+  import cluster.ClusterLogger._
 
   /**
    * Current state
@@ -31,17 +32,18 @@ private[akka] class ClusterReadView(cluster: Cluster) extends Closeable {
   @volatile
   private var _reachability: Reachability = Reachability.empty
 
+  // lazy init below, updated when state is updated
+  @volatile
+  private var _cachedSelf: OptionVal[Member] = OptionVal.None
+
+  @volatile
+  private var _closed: Boolean = false
+
   /**
    * Current internal cluster stats, updated periodically via event bus.
    */
   @volatile
   private var _latestStats = CurrentInternalStats(GossipStats(), VectorClockStats())
-
-  /**
-   * Current cluster metrics, updated periodically via event bus.
-   */
-  @volatile
-  private var _clusterMetrics: Set[NodeMetrics] = Set.empty
 
   val selfAddress = cluster.selfAddress
 
@@ -52,34 +54,60 @@ private[akka] class ClusterReadView(cluster: Cluster) extends Closeable {
       override def postStop(): Unit = cluster.unsubscribe(self)
 
       def receive = {
-        case e: ClusterDomainEvent ⇒ e match {
-          case SeenChanged(convergence, seenBy) ⇒
-            _state = _state.copy(seenBy = seenBy)
-          case ReachabilityChanged(reachability) ⇒
-            _reachability = reachability
-          case MemberRemoved(member, _) ⇒
-            _state = _state.copy(members = _state.members - member, unreachable = _state.unreachable - member)
-          case UnreachableMember(member) ⇒
-            // replace current member with new member (might have different status, only address is used in equals)
-            _state = _state.copy(unreachable = _state.unreachable - member + member)
-          case ReachableMember(member) ⇒
-            _state = _state.copy(unreachable = _state.unreachable - member)
-          case event: MemberEvent ⇒
-            // replace current member with new member (might have different status, only address is used in equals)
-            val newUnreachable =
-              if (_state.unreachable.contains(event.member)) _state.unreachable - event.member + event.member
-              else _state.unreachable
-            _state = _state.copy(
-              members = _state.members - event.member + event.member,
-              unreachable = newUnreachable)
-          case LeaderChanged(leader) ⇒
-            _state = _state.copy(leader = leader)
-          case RoleLeaderChanged(role, leader) ⇒
-            _state = _state.copy(roleLeaderMap = _state.roleLeaderMap + (role → leader))
-          case stats: CurrentInternalStats  ⇒ _latestStats = stats
-          case ClusterMetricsChanged(nodes) ⇒ _clusterMetrics = nodes
-          case ClusterShuttingDown          ⇒
-        }
+        case e: ClusterDomainEvent ⇒
+          e match {
+            case SeenChanged(_, seenBy) ⇒
+              _state = _state.copy(seenBy = seenBy)
+            case ReachabilityChanged(reachability) ⇒
+              _reachability = reachability
+            case MemberRemoved(member, _) ⇒
+              _state = _state.copy(members = _state.members - member, unreachable = _state.unreachable - member)
+            case UnreachableMember(member) ⇒
+              // replace current member with new member (might have different status, only address is used in equals)
+              _state = _state.copy(unreachable = _state.unreachable - member + member)
+            case ReachableMember(member) ⇒
+              _state = _state.copy(unreachable = _state.unreachable - member)
+            case event: MemberEvent ⇒
+              // replace current member with new member (might have different status, only address is used in equals)
+              val newUnreachable =
+                if (_state.unreachable.contains(event.member)) _state.unreachable - event.member + event.member
+                else _state.unreachable
+              _state = _state.copy(
+                members = _state.members - event.member + event.member,
+                unreachable = newUnreachable)
+            case LeaderChanged(leader) ⇒
+              _state = _state.copy(leader = leader)
+            case RoleLeaderChanged(role, leader) ⇒
+              _state = _state.copy(roleLeaderMap = _state.roleLeaderMap + (role → leader))
+            case stats: CurrentInternalStats ⇒ _latestStats = stats
+            case ClusterShuttingDown         ⇒
+
+            case r: ReachableDataCenter ⇒
+              _state = _state.withUnreachableDataCenters(_state.unreachableDataCenters - r.dataCenter)
+            case r: UnreachableDataCenter ⇒
+              _state = _state.withUnreachableDataCenters(_state.unreachableDataCenters + r.dataCenter)
+
+          }
+
+          e match {
+            case e: MemberEvent if e.member.address == selfAddress ⇒
+              _cachedSelf match {
+                case OptionVal.Some(s) if s.status == MemberStatus.Removed && _closed ⇒
+                // ignore as Cluster.close has been called
+                case _ ⇒
+                  _cachedSelf = OptionVal.Some(e.member)
+              }
+            case _ ⇒
+          }
+
+          // once captured, optional verbose logging of event
+          e match {
+            case _: SeenChanged ⇒ // ignore
+            case event ⇒
+              if (cluster.settings.LogInfoVerbose)
+                logInfo(" - event {}", event)
+          }
+
         case s: CurrentClusterState ⇒ _state = s
       }
     }).withDispatcher(cluster.settings.UseDispatcher).withDeploy(Deploy.local), name = "clusterEventBusListener")
@@ -88,9 +116,19 @@ private[akka] class ClusterReadView(cluster: Cluster) extends Closeable {
   def state: CurrentClusterState = _state
 
   def self: Member = {
+    _cachedSelf match {
+      case OptionVal.None ⇒
+        // lazy initialization here, later updated from elsewhere
+        _cachedSelf = OptionVal.Some(selfFromStateOrPlaceholder)
+        _cachedSelf.get
+      case OptionVal.Some(member) ⇒ member
+    }
+  }
+
+  private def selfFromStateOrPlaceholder = {
     import cluster.selfUniqueAddress
-    state.members.find(_.uniqueAddress == selfUniqueAddress).
-      getOrElse(Member(selfUniqueAddress, cluster.selfRoles).copy(status = MemberStatus.Removed))
+    state.members.find(_.uniqueAddress == selfUniqueAddress)
+      .getOrElse(Member(selfUniqueAddress, cluster.selfRoles).copy(status = MemberStatus.Removed))
   }
 
   /**
@@ -118,12 +156,12 @@ private[akka] class ClusterReadView(cluster: Cluster) extends Closeable {
   def status: MemberStatus = self.status
 
   /**
-   * Is this node the leader?
+   * Is this node the current data center leader
    */
-  def isLeader: Boolean = leader == Some(selfAddress)
+  def isLeader: Boolean = leader.contains(selfAddress)
 
   /**
-   * Get the address of the current leader.
+   * Get the address of the current data center leader
    */
   def leader: Option[Address] = state.leader
 
@@ -146,11 +184,6 @@ private[akka] class ClusterReadView(cluster: Cluster) extends Closeable {
   def reachability: Reachability = _reachability
 
   /**
-   * Current cluster metrics.
-   */
-  def clusterMetrics: Set[NodeMetrics] = _clusterMetrics
-
-  /**
    * INTERNAL API
    */
   private[cluster] def refreshCurrentState(): Unit =
@@ -170,8 +203,11 @@ private[akka] class ClusterReadView(cluster: Cluster) extends Closeable {
   /**
    * Unsubscribe to cluster events.
    */
-  def close(): Unit =
+  def close(): Unit = {
+    _closed = true
+    _cachedSelf = OptionVal.Some(self.copy(MemberStatus.Removed))
     if (!eventBusListener.isTerminated)
       eventBusListener ! PoisonPill
+  }
 
 }

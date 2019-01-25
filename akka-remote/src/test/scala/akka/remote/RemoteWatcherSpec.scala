@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.remote
 
 import language.postfixOps
@@ -53,7 +54,7 @@ object RemoteWatcherSpec {
       // that doesn't interfere with the real watch that is going on in the background
       context.system.eventStream.publish(TestRemoteWatcher.AddressTerm(address))
 
-    override def quarantine(address: Address, uid: Option[Long], reason: String): Unit = {
+    override def quarantine(address: Address, uid: Option[Long], reason: String, harmless: Boolean): Unit = {
       // don't quarantine in remoting, but publish a testable message
       context.system.eventStream.publish(TestRemoteWatcher.Quarantined(address, uid))
     }
@@ -86,7 +87,7 @@ class RemoteWatcherSpec extends AkkaSpec(
     akka.remote.transport.AssociationHandle.Disassociated.getClass,
     akka.remote.transport.ActorTransportAdapter.DisassociateUnderlying.getClass)(_))
 
-  override def afterTermination() {
+  override def afterTermination(): Unit = {
     shutdown(remoteSystem)
   }
 
@@ -161,7 +162,7 @@ class RemoteWatcherSpec extends AkkaSpec(
       expectNoMsg(2 seconds)
     }
 
-    "generate AddressTerminated when missing heartbeats" in {
+    "generate AddressTerminated when missing heartbeats" taggedAs LongRunningTest in {
       val p = TestProbe()
       val q = TestProbe()
       system.eventStream.subscribe(p.ref, classOf[TestRemoteWatcher.AddressTerm])
@@ -198,7 +199,7 @@ class RemoteWatcherSpec extends AkkaSpec(
       expectNoMsg(2 seconds)
     }
 
-    "generate AddressTerminated when missing first heartbeat" in {
+    "generate AddressTerminated when missing first heartbeat" taggedAs LongRunningTest in {
       val p = TestProbe()
       val q = TestProbe()
       system.eventStream.subscribe(p.ref, classOf[TestRemoteWatcher.AddressTerm])
@@ -234,7 +235,7 @@ class RemoteWatcherSpec extends AkkaSpec(
       expectNoMsg(2 seconds)
     }
 
-    "generate AddressTerminated for new watch after broken connection that was re-established and broken again" in {
+    "generate AddressTerminated for new watch after broken connection that was re-established and broken again" taggedAs LongRunningTest in {
       val p = TestProbe()
       val q = TestProbe()
       system.eventStream.subscribe(p.ref, classOf[TestRemoteWatcher.AddressTerm])

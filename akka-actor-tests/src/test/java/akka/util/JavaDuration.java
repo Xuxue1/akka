@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.util;
 
 import org.junit.Test;
@@ -18,5 +19,4 @@ public class JavaDuration extends JUnitSuite {
     assert Duration.Zero().lteq(Duration.Inf());
     assert Duration.Inf().gt(Duration.Zero().neg());
   }
-
 }

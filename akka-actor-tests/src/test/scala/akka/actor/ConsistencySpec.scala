@@ -1,3 +1,7 @@
+/*
+ * Copyright (C) 2018-2019 Lightbend Inc. <https://www.lightbend.com>
+ */
+
 package akka.actor
 
 import language.postfixOps
@@ -60,7 +64,7 @@ class ConsistencySpec extends AkkaSpec(ConsistencySpec.config) {
       val props = Props[ConsistencyCheckingActor].withDispatcher("consistency-dispatcher")
       val actors = Vector.fill(noOfActors)(system.actorOf(props))
 
-      for (i ← 0L until 100000L) {
+      for (i ← 0L until 10000L) {
         actors.foreach(_.tell(i, testActor))
       }
 

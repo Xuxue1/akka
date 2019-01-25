@@ -1,46 +1,59 @@
-/**
- * Copyright (C) 2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2016-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.remote.artery
 
+import akka.actor.{ Actor, ActorIdentity, ActorRef, Deploy, Identify, PoisonPill, Props, RootActorPath }
+import akka.testkit.{ ImplicitSender, TestActors, TestProbe }
+import com.typesafe.config.{ Config, ConfigFactory }
+
 import scala.concurrent.duration._
-import akka.actor.{ Actor, ActorIdentity, ActorSystem, Deploy, ExtendedActorSystem, Identify, Props, RootActorPath }
-import akka.testkit.{ AkkaSpec, ImplicitSender }
-import com.typesafe.config.ConfigFactory
-import akka.actor.Actor.Receive
-import akka.remote.RARP
-import akka.testkit.TestActors
-import akka.actor.PoisonPill
-import akka.testkit.TestProbe
-import akka.actor.ActorRef
-import com.typesafe.config.Config
+import akka.actor.ActorSelection
 
-object RemoteSendConsistencySpec {
+class ArteryUpdSendConsistencyWithOneLaneSpec extends AbstractRemoteSendConsistencySpec(ConfigFactory.parseString("""
+      akka.remote.artery.advanced.outbound-lanes = 1
+      akka.remote.artery.advanced.inbound-lanes = 1
+    """).withFallback(ArterySpecSupport.defaultConfig))
 
-  val config = ConfigFactory.parseString(s"""
-     akka {
-       actor.provider = remote
-       remote.artery.enabled = on
-       remote.artery.canonical.hostname = localhost
-       remote.artery.canonical.port = 0
-     }
-  """)
-
-}
-
-class RemoteSendConsistencySpec extends AbstractRemoteSendConsistencySpec(RemoteSendConsistencySpec.config)
-
-class RemoteSendConsistencyWithThreeLanesSpec extends AbstractRemoteSendConsistencySpec(
+class ArteryUpdSendConsistencyWithThreeLanesSpec extends AbstractRemoteSendConsistencySpec(
   ConfigFactory.parseString("""
       akka.remote.artery.advanced.outbound-lanes = 3
       akka.remote.artery.advanced.inbound-lanes = 3
-    """).withFallback(RemoteSendConsistencySpec.config))
+    """).withFallback(ArterySpecSupport.defaultConfig))
 
-abstract class AbstractRemoteSendConsistencySpec(config: Config) extends AkkaSpec(config) with ImplicitSender {
+class ArteryTcpSendConsistencyWithOneLaneSpec extends AbstractRemoteSendConsistencySpec(
+  ConfigFactory.parseString("""
+      akka.remote.artery.transport = tcp
+      akka.remote.artery.advanced.outbound-lanes = 1
+      akka.remote.artery.advanced.inbound-lanes = 1
+    """).withFallback(ArterySpecSupport.defaultConfig))
 
-  val systemB = ActorSystem("systemB", system.settings.config)
-  val addressB = RARP(systemB).provider.getDefaultAddress
-  println(addressB)
+class ArteryTcpSendConsistencyWithThreeLanesSpec extends AbstractRemoteSendConsistencySpec(
+  ConfigFactory.parseString("""
+      akka.remote.artery.transport = tcp
+      akka.remote.artery.advanced.outbound-lanes = 3
+      akka.remote.artery.advanced.inbound-lanes = 3
+    """).withFallback(ArterySpecSupport.defaultConfig))
+
+class ArteryTlsTcpSendConsistencyWithOneLaneSpec extends AbstractRemoteSendConsistencySpec(
+  ConfigFactory.parseString("""
+      akka.remote.artery.transport = tls-tcp
+      akka.remote.artery.advanced.outbound-lanes = 1
+      akka.remote.artery.advanced.inbound-lanes = 1
+    """).withFallback(ArterySpecSupport.defaultConfig))
+
+class ArteryTlsTcpSendConsistencyWithThreeLanesSpec extends AbstractRemoteSendConsistencySpec(
+  ConfigFactory.parseString("""
+      akka.remote.artery.transport = tls-tcp
+      akka.remote.artery.advanced.outbound-lanes = 1
+      akka.remote.artery.advanced.inbound-lanes = 1
+    """).withFallback(ArterySpecSupport.defaultConfig))
+
+abstract class AbstractRemoteSendConsistencySpec(config: Config) extends ArteryMultiNodeSpec(config) with ImplicitSender {
+
+  val systemB = newRemoteSystem(name = Some("systemB"))
+  val addressB = address(systemB)
   val rootB = RootActorPath(addressB)
 
   "Artery" must {
@@ -52,18 +65,26 @@ abstract class AbstractRemoteSendConsistencySpec(config: Config) extends AkkaSpe
         }
       }), "echo")
 
-      val remoteRef = {
+      val echoSel = system.actorSelection(rootB / "user" / "echo")
+      val echoRef = {
         system.actorSelection(rootB / "user" / "echo") ! Identify(None)
         expectMsgType[ActorIdentity](5.seconds).ref.get
       }
 
-      remoteRef ! "ping"
+      echoRef ! "ping"
       expectMsg("pong")
 
-      remoteRef ! "ping"
+      echoRef ! "ping"
       expectMsg("pong")
 
-      remoteRef ! "ping"
+      echoRef ! "ping"
+      expectMsg("pong")
+
+      // and actorSelection
+      echoSel ! "ping"
+      expectMsg("pong")
+
+      echoSel ! "ping"
       expectMsg("pong")
     }
 
@@ -135,8 +156,45 @@ abstract class AbstractRemoteSendConsistencySpec(config: Config) extends AkkaSpe
       }
     }
 
-  }
+    "be able to send messages with actorSelection concurrently preserving order" in {
+      systemB.actorOf(TestActors.echoActorProps, "echoA2")
+      systemB.actorOf(TestActors.echoActorProps, "echoB2")
+      systemB.actorOf(TestActors.echoActorProps, "echoC2")
 
-  override def afterTermination(): Unit = shutdown(systemB)
+      val selA = system.actorSelection(rootB / "user" / "echoA2")
+      val selB = system.actorSelection(rootB / "user" / "echoB2")
+      val selC = system.actorSelection(rootB / "user" / "echoC2")
+
+      def senderProps(sel: ActorSelection) = Props(new Actor {
+        var counter = 1000
+        sel ! counter
+
+        override def receive: Receive = {
+          case i: Int ⇒
+            if (i != counter) testActor ! s"Failed, expected $counter got $i"
+            else if (counter == 0) {
+              testActor ! "success2"
+              context.stop(self)
+            } else {
+              counter -= 1
+              sel ! counter
+            }
+        }
+      }).withDeploy(Deploy.local)
+
+      system.actorOf(senderProps(selA))
+      system.actorOf(senderProps(selB))
+      system.actorOf(senderProps(selC))
+      system.actorOf(senderProps(selA))
+
+      within(10.seconds) {
+        expectMsg("success2")
+        expectMsg("success2")
+        expectMsg("success2")
+        expectMsg("success2")
+      }
+    }
+
+  }
 
 }

@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.dispatch
@@ -152,7 +152,7 @@ private[akka] class Mailboxes(
     } else if (hasRequiredType(actorClass)) {
       try verifyRequirements(lookupByQueueType(getRequiredType(actorClass)))
       catch {
-        case NonFatal(thr) if (hasMailboxRequirement) ⇒ verifyRequirements(lookupByQueueType(mailboxRequirement))
+        case NonFatal(_) if (hasMailboxRequirement) ⇒ verifyRequirements(lookupByQueueType(mailboxRequirement))
       }
     } else if (hasMailboxRequirement) {
       verifyRequirements(lookupByQueueType(mailboxRequirement))
@@ -201,7 +201,7 @@ private[akka] class Mailboxes(
               mailboxType match {
                 case m: ProducesPushTimeoutSemanticsMailbox if m.pushTimeOut.toNanos > 0L ⇒
                   warn(s"Configured potentially-blocking mailbox [$id] configured with non-zero pushTimeOut (${m.pushTimeOut}), " +
-                    s"which can lead to blocking behaviour when sending messages to this mailbox. " +
+                    s"which can lead to blocking behavior when sending messages to this mailbox. " +
                     s"Avoid this by setting `$id.mailbox-push-timeout-time` to `0`.")
                   mailboxNonZeroPushTimeoutWarningIssued = true
                 case _ ⇒ // good; nothing to see here, move along, sir.

@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2014-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2014-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.stream
@@ -8,7 +8,6 @@ import java.util.concurrent.{ CountDownLatch, TimeUnit }
 
 import akka.NotUsed
 import akka.actor.ActorSystem
-import akka.stream.impl.fusing.GraphStages
 import akka.stream.scaladsl._
 import akka.stream.stage._
 import org.openjdk.jmh.annotations.{ OperationsPerInvocation, _ }
@@ -116,13 +115,13 @@ class FusedGraphsBenchmark {
 
     materializer = ActorMaterializer(settings)
     testElements = Array.fill(ElementCount)(new MutableElement(0))
-    val addFunc = (x: MutableElement) => { x.value += 1; x }
+    val addFunc = (x: MutableElement) ⇒ { x.value += 1; x }
 
     val testSource = Source.fromGraph(new TestSource(testElements))
     val testSink = Sink.fromGraph(new JitSafeCompletionLatch)
 
     def fuse(r: RunnableGraph[CountDownLatch]): RunnableGraph[CountDownLatch] = {
-      RunnableGraph.fromGraph(Fusing.aggressive(r))
+      RunnableGraph.fromGraph(r)
     }
 
     val identityStage = new IdentityStage
@@ -179,7 +178,7 @@ class FusedGraphsBenchmark {
           .take(ElementCount)
           .map(addFunc)
           .map(addFunc)
-          .fold(new MutableElement(0))((acc, x) => { acc.value += x.value; acc })
+          .fold(new MutableElement(0))((acc, x) ⇒ { acc.value += x.value; acc })
           .toMat(testSink)(Keep.right)
       )
 
@@ -206,7 +205,7 @@ class FusedGraphsBenchmark {
           .toMat(testSink)(Keep.right)
       )
 
-    val broadcastZipFlow: Flow[MutableElement, MutableElement, NotUsed] = Flow.fromGraph(GraphDSL.create() { implicit b =>
+    val broadcastZipFlow: Flow[MutableElement, MutableElement, NotUsed] = Flow.fromGraph(GraphDSL.create() { implicit b ⇒
       import GraphDSL.Implicits._
 
       val bcast = b.add(Broadcast[MutableElement](2))
@@ -218,7 +217,7 @@ class FusedGraphsBenchmark {
       FlowShape(bcast.in, zip.out.map(_._1).outlet)
     })
 
-    val balanceMergeFlow: Flow[MutableElement, MutableElement, NotUsed] = Flow.fromGraph(GraphDSL.create() { implicit b =>
+    val balanceMergeFlow: Flow[MutableElement, MutableElement, NotUsed] = Flow.fromGraph(GraphDSL.create() { implicit b ⇒
       import GraphDSL.Implicits._
 
       val balance = b.add(Balance[MutableElement](2))
@@ -318,7 +317,7 @@ class FusedGraphsBenchmark {
 
   @Benchmark
   @OperationsPerInvocation(100 * 1000)
-  def boradcast_zip_balance_merge(blackhole: org.openjdk.jmh.infra.Blackhole): Unit = {
+  def broadcast_zip_balance_merge(blackhole: org.openjdk.jmh.infra.Blackhole): Unit = {
     FusedGraphsBenchmark.blackhole = blackhole
     broadcastZipBalanceMerge.run()(materializer).await()
   }

@@ -1,16 +1,16 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.remote.artery
 
 import java.io.NotSerializableException
 import java.util.concurrent.ThreadLocalRandom
 
-import akka.actor.{ Actor, ActorRef, ActorSystem, Address, Deploy, ExtendedActorSystem, PoisonPill, Props }
+import akka.actor.{ Actor, ActorRef, PoisonPill, Props }
 import akka.remote.{ AssociationErrorEvent, DisassociatedEvent, OversizedPayloadException, RARP }
-import akka.testkit.{ AkkaSpec, EventFilter, ImplicitSender, TestActors }
+import akka.testkit.{ EventFilter, ImplicitSender, TestActors }
 import akka.util.ByteString
-import com.typesafe.config.ConfigFactory
 
 import scala.concurrent.duration._
 
@@ -27,8 +27,6 @@ class RemoteMessageSerializationSpec extends ArteryMultiNodeSpec("""
     akka.actor.serialize-messages = off
     akka.actor.serialize-creators = off
   """) with ImplicitSender {
-
-  import RemoteMessageSerializationSpec._
 
   val maxPayloadBytes = RARP(system).provider.remoteSettings.Artery.Advanced.MaximumFrameSize
 
@@ -84,7 +82,7 @@ class RemoteMessageSerializationSpec extends ArteryMultiNodeSpec("""
 
   }
 
-  private def verifySend(msg: Any)(afterSend: ⇒ Unit) {
+  private def verifySend(msg: Any)(afterSend: ⇒ Unit): Unit = {
     val bigBounceId = s"bigBounce-${ThreadLocalRandom.current.nextInt()}"
     val bigBounceOther = remoteSystem.actorOf(Props(new Actor {
       def receive = {

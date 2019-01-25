@@ -1,10 +1,13 @@
-/**
- * Copyright (C) 2015-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2015-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.stream
 
 import java.util.concurrent.TimeUnit
+
+import akka.NotUsed
+import akka.stream.scaladsl.RunnableGraph
 import org.openjdk.jmh.annotations._
 
 @State(Scope.Benchmark)
@@ -16,22 +19,19 @@ class GraphBuilderBenchmark {
   var complexity = 0
 
   @Benchmark
-  def flow_with_map(): Unit = {
+  def flow_with_map(): RunnableGraph[NotUsed] =
     MaterializationBenchmark.flowWithMapBuilder(complexity)
-  }
 
   @Benchmark
-  def graph_with_junctions(): Unit = {
-    MaterializationBenchmark.graphWithJunctionsBuilder(complexity)
-  }
+  def graph_with_junctions_gradual(): RunnableGraph[NotUsed] =
+    MaterializationBenchmark.graphWithJunctionsGradualBuilder(complexity)
 
   @Benchmark
-  def graph_with_nested_imports(): Unit = {
-    MaterializationBenchmark.graphWithNestedImportsBuilder(complexity)
-  }
+  def graph_with_junctions_immediate(): RunnableGraph[NotUsed] =
+    MaterializationBenchmark.graphWithJunctionsImmediateBuilder(complexity)
 
   @Benchmark
-  def graph_with_imported_flow(): Unit = {
+  def graph_with_imported_flow(): RunnableGraph[NotUsed] =
     MaterializationBenchmark.graphWithImportedFlowBuilder(complexity)
-  }
+
 }

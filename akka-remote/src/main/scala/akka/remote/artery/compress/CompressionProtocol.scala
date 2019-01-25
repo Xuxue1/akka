@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Lightbend Inc. <http://www.lightbend.com>
+ * Copyright (C) 2016-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.remote.artery.compress
@@ -8,15 +8,14 @@ import akka.actor.ActorRef
 import akka.remote.UniqueAddress
 import akka.remote.artery.ControlMessage
 
-// FIXME serialization
 /** INTERNAL API */
-/**
- * INTERNAL API
- */
 private[remote] object CompressionProtocol {
 
   /** INTERNAL API */
   sealed trait CompressionMessage
+
+  /** INTERNAL API */
+  sealed trait CompressionAckMessage extends CompressionMessage
 
   /** INTERNAL API */
   sealed trait CompressionAdvertisement[T] extends ControlMessage with CompressionMessage {
@@ -39,7 +38,7 @@ private[remote] object CompressionProtocol {
    * table.
    */
   private[remote] final case class ActorRefCompressionAdvertisementAck(from: UniqueAddress, tableVersion: Byte)
-    extends ControlMessage with CompressionMessage
+    extends ControlMessage with CompressionAckMessage
 
   /**
    * INTERNAL API
@@ -56,7 +55,7 @@ private[remote] object CompressionProtocol {
    * table.
    */
   private[remote] final case class ClassManifestCompressionAdvertisementAck(from: UniqueAddress, tableVersion: Byte)
-    extends ControlMessage with CompressionMessage
+    extends ControlMessage with CompressionAckMessage
 
   /** INTERNAL API */
   private[remote] object Events {

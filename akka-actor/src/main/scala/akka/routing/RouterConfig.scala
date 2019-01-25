@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.routing
 
 import scala.collection.immutable
@@ -15,6 +16,7 @@ import akka.actor.Terminated
 import akka.dispatch.Dispatchers
 import akka.actor.ActorSystem
 import akka.japi.Util.immutableSeq
+import akka.util.unused
 
 /**
  * This trait represents a router factory: it produces the actual router actor
@@ -57,7 +59,7 @@ trait RouterConfig extends Serializable {
    * Management messages not handled by the "head" actor are
    * delegated to this controller actor.
    */
-  def routingLogicController(routingLogic: RoutingLogic): Option[Props] = None
+  def routingLogicController(@unused routingLogic: RoutingLogic): Option[Props] = None
 
   /**
    * Is the message handled by the router head actor or the
@@ -77,12 +79,12 @@ trait RouterConfig extends Serializable {
   /**
    * Overridable merge strategy, by default completely prefers `this` (i.e. no merge).
    */
-  def withFallback(other: RouterConfig): RouterConfig = this
+  def withFallback(@unused other: RouterConfig): RouterConfig = this
 
   /**
    * Check that everything is there which is needed. Called in constructor of RoutedActorRef to fail early.
    */
-  def verifyConfig(path: ActorPath): Unit = ()
+  def verifyConfig(@unused path: ActorPath): Unit = ()
 
   /**
    * INTERNAL API
@@ -128,15 +130,6 @@ private[akka] trait PoolOverrideUnsetConfig[T <: Pool] extends Pool {
  * Java API: Base class for custom router [[Group]]
  */
 abstract class GroupBase extends Group {
-  @deprecated("Implement getPaths with ActorSystem parameter instead", "2.4")
-  def getPaths: java.lang.Iterable[String] = null
-
-  @deprecated("Use paths with ActorSystem parameter instead", "2.4")
-  override final def paths: immutable.Iterable[String] = {
-    val tmp = getPaths
-    if (tmp != null) immutableSeq(tmp)
-    else null
-  }
 
   def getPaths(system: ActorSystem): java.lang.Iterable[String]
 
@@ -150,9 +143,6 @@ abstract class GroupBase extends Group {
  * without watching for termination.
  */
 trait Group extends RouterConfig {
-
-  @deprecated("Implement paths with ActorSystem parameter instead", "2.4")
-  def paths: immutable.Iterable[String] = null
 
   def paths(system: ActorSystem): immutable.Iterable[String]
 
@@ -190,9 +180,6 @@ abstract class PoolBase extends Pool
  * them from the router if they terminate.
  */
 trait Pool extends RouterConfig {
-
-  @deprecated("Implement nrOfInstances with ActorSystem parameter instead", "2.4")
-  def nrOfInstances: Int = -1
 
   /**
    * Initial number of routee instances
@@ -254,7 +241,7 @@ trait Pool extends RouterConfig {
   private[akka] override def createRouterActor(): RouterActor =
     resizer match {
       case None    ⇒ new RouterPoolActor(supervisorStrategy)
-      case Some(r) ⇒ new ResizablePoolActor(supervisorStrategy)
+      case Some(_) ⇒ new ResizablePoolActor(supervisorStrategy)
     }
 
 }

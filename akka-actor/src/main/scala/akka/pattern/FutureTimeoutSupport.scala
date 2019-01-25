@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.pattern
 
 import scala.concurrent.{ ExecutionContext, Promise, Future }
@@ -18,7 +19,7 @@ trait FutureTimeoutSupport {
    * after the specified duration.
    */
   def after[T](duration: FiniteDuration, using: Scheduler)(value: ⇒ Future[T])(implicit ec: ExecutionContext): Future[T] =
-    if (duration.isFinite() && duration.length < 1) {
+    if (duration.isFinite && duration.length < 1) {
       try value catch { case NonFatal(t) ⇒ Future.failed(t) }
     } else {
       val p = Promise[T]()
@@ -27,11 +28,11 @@ trait FutureTimeoutSupport {
     }
 
   /**
-   * Returns a [[scala.concurrent.Future]] that will be completed with the success or failure of the provided value
+   * Returns a [[java.util.concurrent.CompletionStage]] that will be completed with the success or failure of the provided value
    * after the specified duration.
    */
   def afterCompletionStage[T](duration: FiniteDuration, using: Scheduler)(value: ⇒ CompletionStage[T])(implicit ec: ExecutionContext): CompletionStage[T] =
-    if (duration.isFinite() && duration.length < 1) {
+    if (duration.isFinite && duration.length < 1) {
       try value catch { case NonFatal(t) ⇒ Futures.failedCompletionStage(t) }
     } else {
       val p = new CompletableFuture[T]

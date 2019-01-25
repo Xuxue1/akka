@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.actor
@@ -21,7 +21,7 @@ class ReceiveTimeoutSpec extends AkkaSpec {
 
   "An actor with receive timeout" must {
 
-    "get timeout" in {
+    "get timeout" taggedAs TimingTest in {
       val timeoutLatch = TestLatch()
 
       val timeoutActor = system.actorOf(Props(new Actor {
@@ -36,7 +36,7 @@ class ReceiveTimeoutSpec extends AkkaSpec {
       system.stop(timeoutActor)
     }
 
-    "reschedule timeout after regular receive" in {
+    "reschedule timeout after regular receive" taggedAs TimingTest in {
       val timeoutLatch = TestLatch()
 
       val timeoutActor = system.actorOf(Props(new Actor {
@@ -54,7 +54,7 @@ class ReceiveTimeoutSpec extends AkkaSpec {
       system.stop(timeoutActor)
     }
 
-    "be able to turn off timeout if desired" in {
+    "be able to turn off timeout if desired" taggedAs TimingTest in {
       val count = new AtomicInteger(0)
       val timeoutLatch = TestLatch()
 
@@ -77,7 +77,7 @@ class ReceiveTimeoutSpec extends AkkaSpec {
       system.stop(timeoutActor)
     }
 
-    "not receive timeout message when not specified" in {
+    "not receive timeout message when not specified" taggedAs TimingTest in {
       val timeoutLatch = TestLatch()
 
       val timeoutActor = system.actorOf(Props(new Actor {
@@ -90,7 +90,7 @@ class ReceiveTimeoutSpec extends AkkaSpec {
       system.stop(timeoutActor)
     }
 
-    "get timeout while receiving NotInfluenceReceiveTimeout messages" in {
+    "get timeout while receiving NotInfluenceReceiveTimeout messages" taggedAs TimingTest in {
       val timeoutLatch = TestLatch()
 
       val timeoutActor = system.actorOf(Props(new Actor {
@@ -111,6 +111,82 @@ class ReceiveTimeoutSpec extends AkkaSpec {
 
       Await.ready(timeoutLatch, TestLatch.DefaultTimeout)
       ticks.cancel()
+      system.stop(timeoutActor)
+    }
+
+    "get timeout while receiving only NotInfluenceReceiveTimeout messages" taggedAs TimingTest in {
+      val timeoutLatch = TestLatch(2)
+
+      val timeoutActor = system.actorOf(Props(new Actor {
+        context.setReceiveTimeout(1 second)
+
+        def receive = {
+          case ReceiveTimeout ⇒
+            self ! TransperentTick
+            timeoutLatch.countDown()
+          case TransperentTick ⇒
+        }
+      }))
+
+      Await.ready(timeoutLatch, TestLatch.DefaultTimeout)
+      system.stop(timeoutActor)
+    }
+
+    "get timeout while receiving NotInfluenceReceiveTimeout messages scheduled with Timers" taggedAs TimingTest in {
+      val timeoutLatch = TestLatch()
+      val count = new AtomicInteger(0)
+
+      class ActorWithTimer() extends Actor with Timers {
+        timers.startPeriodicTimer("transparentTick", TransperentTick, 100.millis)
+        timers.startPeriodicTimer("identifyTick", Identify(None), 100.millis)
+
+        context.setReceiveTimeout(1 second)
+        def receive: Receive = {
+          case ReceiveTimeout ⇒
+            timeoutLatch.open
+          case TransperentTick ⇒
+            count.incrementAndGet()
+        }
+      }
+
+      val timeoutActor = system.actorOf(Props(new ActorWithTimer()))
+
+      Await.ready(timeoutLatch, TestLatch.DefaultTimeout)
+      count.get() should be > 0
+      system.stop(timeoutActor)
+    }
+
+    "be able to turn on timeout in NotInfluenceReceiveTimeout message handler" taggedAs TimingTest in {
+      val timeoutLatch = TestLatch()
+
+      val timeoutActor = system.actorOf(Props(new Actor {
+        def receive = {
+          case TransperentTick ⇒ context.setReceiveTimeout(500 milliseconds)
+          case ReceiveTimeout  ⇒ timeoutLatch.open
+        }
+      }))
+
+      timeoutActor ! TransperentTick
+
+      Await.ready(timeoutLatch, TestLatch.DefaultTimeout)
+      system.stop(timeoutActor)
+    }
+
+    "be able to turn off timeout in NotInfluenceReceiveTimeout message handler" taggedAs TimingTest in {
+      val timeoutLatch = TestLatch()
+
+      val timeoutActor = system.actorOf(Props(new Actor {
+        context.setReceiveTimeout(500 milliseconds)
+
+        def receive = {
+          case TransperentTick ⇒ context.setReceiveTimeout(Duration.Inf)
+          case ReceiveTimeout  ⇒ timeoutLatch.open
+        }
+      }))
+
+      timeoutActor ! TransperentTick
+
+      intercept[TimeoutException] { Await.ready(timeoutLatch, 1 second) }
       system.stop(timeoutActor)
     }
   }

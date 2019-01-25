@@ -1,3 +1,7 @@
+/*
+ * Copyright (C) 2018-2019 Lightbend Inc. <https://www.lightbend.com>
+ */
+
 package akka.actor;
 
 import java.lang.annotation.*;
@@ -6,5 +10,5 @@ import java.lang.annotation.*;
 @Target(ElementType.METHOD)
 @Inherited
 public @interface TestAnnotation {
-    String someString() default "pigdog";
+  String someString() default "pigdog";
 }

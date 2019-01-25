@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.remote.routing
 
 import scala.concurrent.duration._
@@ -10,7 +11,7 @@ import akka.actor.Address
 import akka.actor.PoisonPill
 import akka.actor.Props
 import akka.remote.RemotingMultiNodeSpec
-import akka.remote.testkit.{ MultiNodeConfig, MultiNodeSpec, STMultiNodeSpec }
+import akka.remote.testkit.MultiNodeConfig
 import akka.routing.Broadcast
 import akka.routing.ScatterGatherFirstCompletedPool
 import akka.routing.RoutedActorRef
@@ -28,7 +29,7 @@ class RemoteScatterGatherConfig(artery: Boolean) extends MultiNodeConfig {
   commonConfig(debugConfig(on = false).withFallback(
     ConfigFactory.parseString(s"""
       akka.remote.artery.enabled = $artery
-      """)).withFallback(RemotingMultiNodeSpec.arteryFlightRecordingConf))
+      """)).withFallback(RemotingMultiNodeSpec.commonConfig))
 
   deployOnAll("""
       /service-hello {
@@ -81,6 +82,9 @@ class RemoteScatterGatherSpec(multiNodeConfig: RemoteScatterGatherConfig) extend
         val connectionCount = 3
         val iterationCount = 10
 
+        // let them start
+        Thread.sleep(2000)
+
         for (i ← 0 until iterationCount; k ← 0 until connectionCount) {
           actor ! "hit"
         }
@@ -104,7 +108,7 @@ class RemoteScatterGatherSpec(multiNodeConfig: RemoteScatterGatherConfig) extend
         enterBarrier("done")
       }
 
-      enterBarrier("done")
+      enterBarrier("all-done")
     }
   }
 }

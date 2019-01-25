@@ -1,3 +1,7 @@
+/*
+ * Copyright (C) 2018-2019 Lightbend Inc. <https://www.lightbend.com>
+ */
+
 package akka.actor.dispatch
 
 import java.util.concurrent.CountDownLatch
@@ -47,7 +51,7 @@ class DispatcherActorsSpec extends AkkaSpec {
       fFinished.await
       assert(sFinished.getCount > 0)
       sFinished.await
-      assert(sFinished.getCount === 0)
+      assert(sFinished.getCount === 0L)
       system.stop(f)
       system.stop(s)
     }

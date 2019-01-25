@@ -1,27 +1,24 @@
-/**
- * Copyright (C) 2015-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2015-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.impl.io
 
 import java.io.{ IOException, OutputStream }
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.{ BlockingQueue, LinkedBlockingQueue }
-import akka.stream.{ Outlet, SourceShape, Attributes }
+
 import akka.stream.Attributes.InputBuffer
 import akka.stream.impl.Stages.DefaultAttributes
 import akka.stream.impl.io.OutputStreamSourceStage._
 import akka.stream.stage._
+import akka.stream.{ ActorMaterializerHelper, Attributes, Outlet, SourceShape }
 import akka.util.ByteString
+
 import scala.concurrent.duration.FiniteDuration
-import scala.concurrent.{ Await, Future, Promise }
+import scala.concurrent.{ Await, ExecutionContext, Future, Promise }
 import scala.util.control.NonFatal
 import scala.util.{ Failure, Success, Try }
-import akka.stream.ActorAttributes
-import akka.stream.impl.Stages.DefaultAttributes.IODispatcher
-import akka.stream.ActorAttributes.Dispatcher
-import scala.concurrent.ExecutionContext
-import akka.stream.ActorMaterializer
-import akka.stream.ActorMaterializerHelper
 
 private[stream] object OutputStreamSourceStage {
   sealed trait AdapterToStageMessage
@@ -32,9 +29,6 @@ private[stream] object OutputStreamSourceStage {
   case object Ok extends DownstreamStatus
   case object Canceled extends DownstreamStatus
 
-  sealed trait StageWithCallback {
-    def wakeUp(msg: AdapterToStageMessage): Future[Unit]
-  }
 }
 
 final private[stream] class OutputStreamSourceStage(writeTimeout: FiniteDuration) extends GraphStageWithMaterializedValue[SourceShape[ByteString], OutputStream] {
@@ -43,21 +37,20 @@ final private[stream] class OutputStreamSourceStage(writeTimeout: FiniteDuration
   override val shape: SourceShape[ByteString] = SourceShape.of(out)
 
   override def createLogicAndMaterializedValue(inheritedAttributes: Attributes): (GraphStageLogic, OutputStream) = {
-    val maxBuffer = inheritedAttributes.getAttribute(classOf[InputBuffer], InputBuffer(16, 16)).max
-
-    val dispatcherId = inheritedAttributes.get[Dispatcher](IODispatcher).dispatcher
+    val maxBuffer = inheritedAttributes.get[InputBuffer](InputBuffer(16, 16)).max
 
     require(maxBuffer > 0, "Buffer size must be greater than 0")
 
     val dataQueue = new LinkedBlockingQueue[ByteString](maxBuffer)
     val downstreamStatus = new AtomicReference[DownstreamStatus](Ok)
 
-    val logic = new GraphStageLogic(shape) with StageWithCallback {
+    final class OutputStreamSourceLogic extends GraphStageLogic(shape) {
+
       var flush: Option[Promise[Unit]] = None
       var close: Option[Promise[Unit]] = None
 
       private var dispatcher: ExecutionContext = null // set in preStart
-      private var blockingThread: Thread = null // for postStop interrupt
+      private val blockingThreadRef: AtomicReference[Thread] = new AtomicReference() // for postStop interrupt
 
       private val downstreamCallback: AsyncCallback[Try[ByteString]] =
         getAsyncCallback {
@@ -68,7 +61,7 @@ final private[stream] class OutputStreamSourceStage(writeTimeout: FiniteDuration
       private val upstreamCallback: AsyncCallback[(AdapterToStageMessage, Promise[Unit])] =
         getAsyncCallback(onAsyncMessage)
 
-      override def wakeUp(msg: AdapterToStageMessage): Future[Unit] = {
+      def wakeUp(msg: AdapterToStageMessage): Future[Unit] = {
         val p = Promise[Unit]()
         upstreamCallback.invoke((msg, p))
         p.future
@@ -81,11 +74,7 @@ final private[stream] class OutputStreamSourceStage(writeTimeout: FiniteDuration
             sendResponseIfNeed()
           case Close ⇒
             close = Some(event._2)
-            if (dataQueue.isEmpty) {
-              downstreamStatus.set(Canceled)
-              completeStage()
-              unblockUpstream()
-            } else sendResponseIfNeed()
+            sendResponseIfNeed()
         }
 
       private def unblockUpstream(): Boolean =
@@ -96,8 +85,10 @@ final private[stream] class OutputStreamSourceStage(writeTimeout: FiniteDuration
             true
           case None ⇒ close match {
             case Some(p) ⇒
+              downstreamStatus.set(Canceled)
               p.complete(Success(()))
               close = None
+              completeStage()
               true
             case None ⇒ false
           }
@@ -113,24 +104,19 @@ final private[stream] class OutputStreamSourceStage(writeTimeout: FiniteDuration
         }
 
       override def preStart(): Unit = {
-        dispatcher = ActorMaterializerHelper.downcast(materializer).system.dispatchers.lookup(dispatcherId)
-        super.preStart()
+        // this stage is running on the blocking IO dispatcher by default, but we also want to schedule futures
+        // that are blocking, so we need to look it up
+        val actorMat = ActorMaterializerHelper.downcast(materializer)
+        dispatcher = actorMat.system.dispatchers.lookup(actorMat.settings.blockingIoDispatcher)
       }
 
       setHandler(out, new OutHandler {
-        override def onDownstreamFinish(): Unit = {
-          //assuming there can be no further in messages
-          downstreamStatus.set(Canceled)
-          dataQueue.clear()
-          // if blocked reading, make sure the take() completes
-          dataQueue.put(ByteString.empty)
-          completeStage()
-        }
         override def onPull(): Unit = {
           implicit val ec = dispatcher
           Future {
+            val currentThread = Thread.currentThread()
             // keep track of the thread for postStop interrupt
-            blockingThread = Thread.currentThread()
+            blockingThreadRef.compareAndSet(null, currentThread)
             try {
               dataQueue.take()
             } catch {
@@ -138,19 +124,27 @@ final private[stream] class OutputStreamSourceStage(writeTimeout: FiniteDuration
                 Thread.interrupted()
                 ByteString.empty
             } finally {
-              blockingThread = null
+              blockingThreadRef.compareAndSet(currentThread, null);
             }
           }.onComplete(downstreamCallback.invoke)
         }
       })
 
       override def postStop(): Unit = {
+        //assuming there can be no further in messages
+        downstreamStatus.set(Canceled)
+        dataQueue.clear()
+        // if blocked reading, make sure the take() completes
+        dataQueue.put(ByteString.empty)
         // interrupt any pending blocking take
+        val blockingThread = blockingThreadRef.get()
         if (blockingThread != null)
           blockingThread.interrupt()
         super.postStop()
       }
     }
+
+    val logic = new OutputStreamSourceLogic
     (logic, new OutputStreamAdapter(dataQueue, downstreamStatus, logic.wakeUp, writeTimeout))
   }
 }
@@ -164,7 +158,7 @@ private[akka] class OutputStreamAdapter(
 
   var isActive = true
   var isPublisherAlive = true
-  val publisherClosedException = new IOException("Reactive stream is terminated, no writes are possible")
+  def publisherClosedException = new IOException("Reactive stream is terminated, no writes are possible")
 
   @scala.throws(classOf[IOException])
   private[this] def send(sendAction: () ⇒ Unit): Unit = {

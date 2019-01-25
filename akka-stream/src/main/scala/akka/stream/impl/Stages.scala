@@ -1,24 +1,24 @@
-/**
- * Copyright (C) 2015-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2015-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.impl
 
-import akka.stream.ActorAttributes.SupervisionStrategy
+import akka.annotation.InternalApi
 import akka.stream.Attributes._
-import akka.stream.Supervision.Decider
 import akka.stream._
-import akka.stream.stage.AbstractStage.PushPullGraphStage
-import akka.stream.stage.Stage
 
 /**
  * INTERNAL API
  */
-object Stages {
+@InternalApi private[akka] object Stages {
 
   object DefaultAttributes {
-    val IODispatcher = ActorAttributes.Dispatcher("akka.stream.default-blocking-io-dispatcher")
+    // reusable common attributes
+    val IODispatcher = ActorAttributes.IODispatcher
     val inputBufferOne = inputBuffer(initial = 1, max = 1)
 
+    // stage specific default attributes
     val fused = name("fused")
     val materializedValueSource = name("matValueSource")
     val map = name("map")
@@ -29,8 +29,10 @@ object Stages {
     val recover = name("recover")
     val mapAsync = name("mapAsync")
     val mapAsyncUnordered = name("mapAsyncUnordered")
+    val ask = name("ask")
     val grouped = name("grouped")
     val groupedWithin = name("groupedWithin")
+    val groupedWeightedWithin = name("groupedWeightedWithin")
     val limit = name("limit")
     val limitWeighted = name("limitWeighted")
     val sliding = name("sliding")
@@ -70,11 +72,14 @@ object Stages {
 
     val merge = name("merge")
     val mergePreferred = name("mergePreferred")
+    val mergePrioritized = name("mergePrioritized")
     val flattenMerge = name("flattenMerge")
     val recoverWith = name("recoverWith")
     val broadcast = name("broadcast")
+    val wireTap = name("wireTap")
     val balance = name("balance")
     val zip = name("zip")
+    val zipLatest = name("zipLatest")
     val zipN = name("zipN")
     val zipWithN = name("zipWithN")
     val zipWithIndex = name("zipWithIndex")
@@ -87,11 +92,13 @@ object Stages {
     val delay = name("delay")
 
     val terminationWatcher = name("terminationWatcher")
+    val watch = name("watch")
 
     val publisherSource = name("publisherSource")
     val iterableSource = name("iterableSource")
     val cycledSource = name("cycledSource")
     val futureSource = name("futureSource")
+    val futureFlattenSource = name("futureFlattenSource")
     val tickSource = name("tickSource")
     val singleSource = name("singleSource")
     val emptySource = name("emptySource")
@@ -118,6 +125,7 @@ object Stages {
     val headOptionSink = name("headOptionSink") and inputBufferOne
     val lastSink = name("lastSink")
     val lastOptionSink = name("lastOptionSink")
+    val takeLastSink = name("takeLastSink")
     val seqSink = name("seqSink")
     val publisherSink = name("publisherSink")
     val fanoutPublisherSink = name("fanoutPublisherSink")
@@ -127,32 +135,12 @@ object Stages {
     val actorSubscriberSink = name("actorSubscriberSink")
     val queueSink = name("queueSink")
     val lazySink = name("lazySink")
+    val lazyFlow = name("lazyFlow")
+    val lazySource = name("lazySource")
     val outputStreamSink = name("outputStreamSink") and IODispatcher
     val inputStreamSink = name("inputStreamSink") and IODispatcher
     val fileSink = name("fileSink") and IODispatcher
     val fromJavaStream = name("fromJavaStream")
-  }
-
-  import DefaultAttributes._
-
-  /*
-   * Stage that is backed by a GraphStage but can be symbolically introspected
-   */
-  case class SymbolicGraphStage[-In, +Out, Ext](symbolicStage: SymbolicStage[In, Out])
-    extends PushPullGraphStage[In, Out, Ext](
-      symbolicStage.create,
-      symbolicStage.attributes) {
-  }
-
-  sealed trait SymbolicStage[-In, +Out] {
-    def attributes: Attributes
-    def create(effectiveAttributes: Attributes): Stage[In, Out]
-
-    // FIXME: No supervision hooked in yet.
-
-    protected def supervision(attributes: Attributes): Decider =
-      attributes.get[SupervisionStrategy](SupervisionStrategy(Supervision.stoppingDecider)).decider
-
   }
 
 }

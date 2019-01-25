@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2015-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2015-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.impl.fusing
 
 import akka.actor.{ NoSerializationVerificationNeeded, ActorRef }
@@ -9,6 +10,7 @@ import akka.stream.testkit.StreamSpec
 import akka.stream.{ Attributes, Inlet, SinkShape, ActorMaterializer }
 import akka.stream.stage.{ InHandler, AsyncCallback, GraphStageLogic, GraphStageWithMaterializedValue }
 import akka.stream.testkit.Utils._
+import akka.stream.testkit.scaladsl.StreamTestKit._
 
 import scala.concurrent.{ Await, Promise, Future }
 import scala.concurrent.duration._

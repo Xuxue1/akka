@@ -1,18 +1,20 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.cluster.sharding
 
-import akka.cluster.ddata.{ ReplicatorSettings, Replicator }
-import akka.cluster.sharding.ShardCoordinator.Internal.{ ShardStopped, HandOff }
+import akka.cluster.ddata.{ Replicator, ReplicatorSettings }
+import akka.cluster.sharding.ShardCoordinator.Internal.{ HandOff, ShardStopped }
 import akka.cluster.sharding.ShardRegion.Passivate
 import akka.cluster.sharding.ShardRegion.GetCurrentRegions
 import akka.cluster.sharding.ShardRegion.CurrentRegions
+
 import language.postfixOps
 import scala.concurrent.duration._
 import com.typesafe.config.ConfigFactory
 import akka.actor._
-import akka.cluster.Cluster
+import akka.cluster.{ Cluster, MultiNodeClusterSpec }
 import akka.persistence.PersistentActor
 import akka.persistence.Persistence
 import akka.persistence.journal.leveldb.SharedLeveldbJournal
@@ -24,6 +26,7 @@ import akka.remote.testkit.STMultiNodeSpec
 import akka.testkit._
 import akka.testkit.TestEvent.Mute
 import java.io.File
+
 import org.apache.commons.io.FileUtils
 import akka.cluster.singleton.ClusterSingletonManager
 import akka.cluster.singleton.ClusterSingletonManagerSettings
@@ -82,8 +85,9 @@ object ClusterShardingSpec {
   val numberOfShards = 12
 
   val extractShardId: ShardRegion.ExtractShardId = {
-    case EntityEnvelope(id, _) ⇒ (id % numberOfShards).toString
-    case Get(id)               ⇒ (id % numberOfShards).toString
+    case EntityEnvelope(id, _)       ⇒ (id % numberOfShards).toString
+    case Get(id)                     ⇒ (id % numberOfShards).toString
+    case ShardRegion.StartEntity(id) ⇒ (id.toLong % numberOfShards).toString
   }
 
   def qualifiedCounterProps(typeName: String): Props =
@@ -137,10 +141,10 @@ abstract class ClusterShardingSpecConfig(
     akka.persistence.journal.plugin = "akka.persistence.journal.leveldb-shared"
     akka.persistence.journal.leveldb-shared.store {
       native = off
-      dir = "target/journal-ClusterShardingSpec"
+      dir = "target/ClusterShardingSpec/journal"
     }
     akka.persistence.snapshot-store.plugin = "akka.persistence.snapshot-store.local"
-    akka.persistence.snapshot-store.local.dir = "target/snapshots-ClusterShardingSpec"
+    akka.persistence.snapshot-store.local.dir = "target/ClusterShardingSpec/snapshots"
     akka.cluster.sharding {
       retry-interval = 1 s
       handoff-timeout = 10 s
@@ -154,12 +158,16 @@ abstract class ClusterShardingSpecConfig(
         number-of-entities = 1
       }
       least-shard-allocation-strategy {
-        rebalance-threshold = 2
+        rebalance-threshold = 1
         max-simultaneous-rebalance = 1
+      }
+      distributed-data.durable.lmdb {
+        dir = target/ClusterShardingSpec/sharding-ddata
+        map-size = 10 MiB
       }
     }
     akka.testconductor.barrier-timeout = 70s
-    """))
+    """).withFallback(MultiNodeClusterSpec.clusterConfig))
   nodeConfig(sixth) {
     ConfigFactory.parseString("""akka.cluster.roles = ["frontend"]""")
   }
@@ -180,8 +188,23 @@ object ClusterShardingDocCode {
   val extractShardId: ShardRegion.ExtractShardId = {
     case EntityEnvelope(id, _) ⇒ (id % numberOfShards).toString
     case Get(id)               ⇒ (id % numberOfShards).toString
+    case ShardRegion.StartEntity(id) ⇒
+      // StartEntity is used by remembering entities feature
+      (id.toLong % numberOfShards).toString
   }
   //#counter-extractor
+
+  {
+    //#extractShardId-StartEntity
+    val extractShardId: ShardRegion.ExtractShardId = {
+      case EntityEnvelope(id, _) ⇒ (id % numberOfShards).toString
+      case Get(id)               ⇒ (id % numberOfShards).toString
+      case ShardRegion.StartEntity(id) ⇒
+        // StartEntity is used by remembering entities feature
+        (id.toLong % numberOfShards).toString
+    }
+    //#extractShardId-StartEntity
+  }
 
 }
 
@@ -231,27 +254,21 @@ class DDataClusterShardingWithEntityRecoveryMultiJvmNode5 extends DDataClusterSh
 class DDataClusterShardingWithEntityRecoveryMultiJvmNode6 extends DDataClusterShardingSpec
 class DDataClusterShardingWithEntityRecoveryMultiJvmNode7 extends DDataClusterShardingSpec
 
-abstract class ClusterShardingSpec(config: ClusterShardingSpecConfig) extends MultiNodeSpec(config) with STMultiNodeSpec with ImplicitSender {
+abstract class ClusterShardingSpec(config: ClusterShardingSpecConfig) extends MultiNodeSpec(config) with MultiNodeClusterSpec
+  with STMultiNodeSpec with ImplicitSender {
   import ClusterShardingSpec._
   import config._
 
-  override def initialParticipants = roles.size
+  val storageLocations = List(new File(system.settings.config.getString(
+    "akka.cluster.sharding.distributed-data.durable.lmdb.dir")).getParentFile)
 
-  val storageLocations = List(
-    "akka.persistence.journal.leveldb.dir",
-    "akka.persistence.journal.leveldb-shared.store.dir",
-    "akka.persistence.snapshot-store.local.dir").map(s ⇒ new File(system.settings.config.getString(s)))
-
-  override protected def atStartup() {
-    runOn(controller) {
-      storageLocations.foreach(dir ⇒ if (dir.exists) FileUtils.deleteDirectory(dir))
-    }
+  override protected def atStartup(): Unit = {
+    storageLocations.foreach(dir ⇒ if (dir.exists) FileUtils.deleteQuietly(dir))
+    enterBarrier("startup")
   }
 
-  override protected def afterTermination() {
-    runOn(controller) {
-      storageLocations.foreach(dir ⇒ if (dir.exists) FileUtils.deleteDirectory(dir))
-    }
+  override protected def afterTermination(): Unit = {
+    storageLocations.foreach(dir ⇒ if (dir.exists) FileUtils.deleteQuietly(dir))
   }
 
   def join(from: RoleName, to: RoleName): Unit = {
@@ -262,9 +279,10 @@ abstract class ClusterShardingSpec(config: ClusterShardingSpecConfig) extends Mu
     enterBarrier(from.name + "-joined")
   }
 
+  lazy val replicator = system.actorOf(Replicator.props(
+    ReplicatorSettings(system).withGossipInterval(1.second).withMaxDeltaElements(10)), "replicator")
+
   def createCoordinator(): Unit = {
-    val replicator = system.actorOf(Replicator.props(
-      ReplicatorSettings(system).withGossipInterval(1.second).withMaxDeltaElements(10)), "replicator")
 
     def coordinatorProps(typeName: String, rebalanceEnabled: Boolean, rememberEntities: Boolean) = {
       val allocationStrategy = new ShardCoordinator.LeastShardAllocationStrategy(rebalanceThreshold = 2, maxSimultaneousRebalance = 1)
@@ -274,10 +292,12 @@ abstract class ClusterShardingSpec(config: ClusterShardingSpecConfig) extends Mu
       rebalance-interval = ${if (rebalanceEnabled) "2s" else "3600s"}
       """).withFallback(system.settings.config.getConfig("akka.cluster.sharding"))
       val settings = ClusterShardingSettings(cfg).withRememberEntities(rememberEntities)
+      val majorityMinCap = system.settings.config.getInt(
+        "akka.cluster.sharding.distributed-data.majority-min-cap")
       if (settings.stateStoreMode == "persistence")
         ShardCoordinator.props(typeName, settings, allocationStrategy)
       else
-        ShardCoordinator.props(typeName, settings, allocationStrategy, replicator)
+        ShardCoordinator.props(typeName, settings, allocationStrategy, replicator, majorityMinCap)
     }
 
     List("counter", "rebalancingCounter", "RememberCounterEntities", "AnotherRememberCounter",
@@ -289,7 +309,8 @@ abstract class ClusterShardingSpec(config: ClusterShardingSpecConfig) extends Mu
           childName = "coordinator",
           minBackoff = 5.seconds,
           maxBackoff = 5.seconds,
-          randomFactor = 0.1).withDeploy(Deploy.local)
+          randomFactor = 0.1,
+          maxNrOfRetries = -1).withDeploy(Deploy.local)
         system.actorOf(
           ClusterSingletonManager.props(
             singletonProps,
@@ -311,12 +332,14 @@ abstract class ClusterShardingSpec(config: ClusterShardingSpecConfig) extends Mu
     system.actorOf(
       ShardRegion.props(
         typeName = typeName,
-        entityProps = qualifiedCounterProps(typeName),
+        entityProps = _ ⇒ qualifiedCounterProps(typeName),
         settings = settings,
         coordinatorPath = "/user/" + typeName + "Coordinator/singleton/coordinator",
         extractEntityId = extractEntityId,
         extractShardId = extractShardId,
-        handOffStopMessage = PoisonPill),
+        handOffStopMessage = PoisonPill,
+        replicator,
+        majorityMinCap = 3),
       name = typeName + "Region")
   }
 
@@ -329,8 +352,11 @@ abstract class ClusterShardingSpec(config: ClusterShardingSpecConfig) extends Mu
   lazy val rebalancingPersistentRegion = createRegion("RebalancingRememberCounter", rememberEntities = true)
   lazy val autoMigrateRegion = createRegion("AutoMigrateRememberRegionTest", rememberEntities = true)
 
+  def isDdataMode: Boolean = mode == ClusterShardingSettings.StateStoreModeDData
+
   s"Cluster sharding ($mode)" must {
 
+    // must be done also in ddata mode since Counter is PersistentActor
     "setup shared journal" in {
       // start the Persistence extension
       Persistence(system)
@@ -437,10 +463,13 @@ abstract class ClusterShardingSpec(config: ClusterShardingSpecConfig) extends Mu
         val proxy = system.actorOf(
           ShardRegion.proxyProps(
             typeName = "counter",
+            dataCenter = None,
             settings,
             coordinatorPath = "/user/counterCoordinator/singleton/coordinator",
             extractEntityId = extractEntityId,
-            extractShardId = extractShardId),
+            extractShardId = extractShardId,
+            system.deadLetters,
+            majorityMinCap = 0),
           name = "regionProxy")
 
         proxy ! Get(1)
@@ -673,6 +702,21 @@ abstract class ClusterShardingSpec(config: ClusterShardingSpecConfig) extends Mu
 
   }
 
+  "demonstrate API for DC proxy" in within(50.seconds) {
+    runOn(sixth) {
+      // #proxy-dc
+      val counterProxyDcB: ActorRef = ClusterSharding(system).startProxy(
+        typeName = "Counter",
+        role = None,
+        dataCenter = Some("B"),
+        extractEntityId = extractEntityId,
+        extractShardId = extractShardId)
+      // #proxy-dc
+    }
+    enterBarrier("after-dc-proxy")
+
+  }
+
   "Persistent Cluster Shards" must {
     "recover entities upon restart" in within(50.seconds) {
       runOn(third, fourth, fifth) {
@@ -802,9 +846,12 @@ abstract class ClusterShardingSpec(config: ClusterShardingSpecConfig) extends Mu
         system.actorSelection(shard / "1") ! Identify(3)
         expectMsg(ActorIdentity(3, None))
 
-        //Check counter 13 is alive again                        8
-        system.actorSelection(shard / "13") ! Identify(4)
-        expectMsgType[ActorIdentity](3 seconds).ref should not be (None)
+        //Check counter 13 is alive again
+        val probe3 = TestProbe()
+        awaitAssert({
+          system.actorSelection(shard / "13").tell(Identify(4), probe3.ref)
+          probe3.expectMsgType[ActorIdentity](1 second).ref should not be (None)
+        }, 5 seconds, 500 millis)
       }
 
       enterBarrier("after-13")

@@ -1,50 +1,34 @@
-/**
- * Copyright (C) 2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2016-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.remote.artery
 
-import scala.concurrent.duration._
-import akka.actor.{ ActorIdentity, ActorSystem, ExtendedActorSystem, Identify, RootActorPath }
-import akka.remote.RARP
-import akka.testkit.{ AkkaSpec, ImplicitSender }
+import akka.actor.{ ActorIdentity, Identify, RootActorPath }
+import akka.testkit.ImplicitSender
 import akka.testkit.TestActors
-import com.typesafe.config.ConfigFactory
 import akka.testkit.EventFilter
 
 object SerializationErrorSpec {
-
-  val config = ConfigFactory.parseString(s"""
-     akka {
-       actor.provider = remote
-       remote.artery.enabled = on
-       remote.artery.canonical.hostname = localhost
-       remote.artery.canonical.port = 0
-       actor {
-         serialize-creators = false
-         serialize-messages = false
-       }
-     }
-  """)
 
   object NotSerializableMsg
 
 }
 
-class SerializationErrorSpec extends AkkaSpec(SerializationErrorSpec.config) with ImplicitSender {
+class SerializationErrorSpec extends ArteryMultiNodeSpec(ArterySpecSupport.defaultConfig) with ImplicitSender {
   import SerializationErrorSpec._
 
-  val configB = ConfigFactory.parseString("""
-     akka.actor.serialization-identifiers {
-       # this will cause deserialization error
-       "akka.serialization.ByteArraySerializer" = -4
-     }
-     """).withFallback(system.settings.config)
-  val systemB = ActorSystem("systemB", configB)
+  val systemB = newRemoteSystem(
+    name = Some("systemB"),
+    extraConfig = Some("""
+       akka.actor.serialization-identifiers {
+         # this will cause deserialization error
+         "akka.serialization.ByteArraySerializer" = -4
+       }
+       """))
   systemB.actorOf(TestActors.echoActorProps, "echo")
-  val addressB = RARP(systemB).provider.getDefaultAddress
+  val addressB = address(systemB)
   val rootB = RootActorPath(addressB)
-
-  override def afterTermination(): Unit = shutdown(systemB)
 
   "Serialization error" must {
 
@@ -75,7 +59,7 @@ class SerializationErrorSpec extends AkkaSpec(SerializationErrorSpec.config) wit
       expectMsg("ping")
 
       EventFilter.warning(
-        start = "Failed to deserialize message with serializer id [4]", occurrences = 1).intercept {
+        pattern = """Failed to deserialize message from \[.*\] with serializer id \[4\]""", occurrences = 1).intercept {
         remoteRef ! "boom".getBytes("utf-8")
       }(systemB)
 

@@ -1,3 +1,7 @@
+/*
+ * Copyright (C) 2018-2019 Lightbend Inc. <https://www.lightbend.com>
+ */
+
 package akka.stream.scaladsl
 
 import java.util.Collections
@@ -36,17 +40,17 @@ import scala.util.{ Failure, Success, Try }
  * The TLS specification does not permit half-closing of the user data session
  * that it transports—to be precise a half-close will always promptly lead to a
  * full close. This means that canceling the plaintext output or completing the
- * plaintext input of the SslTls stage will lead to full termination of the
+ * plaintext input of the SslTls operator will lead to full termination of the
  * secure connection without regard to whether bytes are remaining to be sent or
  * received, respectively. Especially for a client the common idiom of attaching
  * a finite Source to the plaintext input and transforming the plaintext response
  * bytes coming out will not work out of the box due to early termination of the
  * connection. For this reason there is a parameter that determines whether the
- * SslTls stage shall ignore completion and/or cancellation events, and the
+ * SslTls operator shall ignore completion and/or cancellation events, and the
  * default is to ignore completion (in view of the client–server scenario). In
  * order to terminate the connection the client will then need to cancel the
  * plaintext output as soon as all expected bytes have been received. When
- * ignoring both types of events the stage will shut down once both events have
+ * ignoring both types of events the operator will shut down once both events have
  * been received. See also [[TLSClosing]].
  */
 object TLS {
@@ -76,11 +80,14 @@ object TLS {
       sslConfig.getOrElse(AkkaSSLConfig(system))
 
     val createSSLEngine = { system: ActorSystem ⇒
-      val engine = hostInfo match {
-        case Some((hostname, port)) ⇒ sslContext.createSSLEngine(hostname, port)
-        case None                   ⇒ sslContext.createSSLEngine()
-      }
       val config = theSslConfig(system)
+
+      val engine = hostInfo match {
+        case Some((hostname, port)) if !config.config.loose.disableSNI ⇒
+          sslContext.createSSLEngine(hostname, port)
+        case _ ⇒ sslContext.createSSLEngine()
+      }
+
       config.sslEngineConfigurator.configure(engine, sslContext)
       engine.setUseClientMode(role == Client)
 
@@ -111,7 +118,7 @@ object TLS {
         case None ⇒ (_, _) ⇒ Success(())
       }
 
-    new scaladsl.BidiFlow(TlsModule(Attributes.none, createSSLEngine, verifySession, closing))
+    scaladsl.BidiFlow.fromGraph(TlsModule(Attributes.none, createSSLEngine, verifySession, closing))
   }
 
   /**
@@ -166,7 +173,21 @@ object TLS {
     verifySession:   SSLSession ⇒ Try[Unit], // we don't offer the internal API that provides `ActorSystem` here, see #21753
     closing:         TLSClosing
   ): scaladsl.BidiFlow[SslTlsOutbound, ByteString, ByteString, SslTlsInbound, NotUsed] =
-    new scaladsl.BidiFlow(TlsModule(Attributes.none, _ ⇒ createSSLEngine(), (_, session) ⇒ verifySession(session), closing))
+    scaladsl.BidiFlow.fromGraph(TlsModule(Attributes.none, _ ⇒ createSSLEngine(), (_, session) ⇒ verifySession(session), closing))
+
+  /**
+   * Create a StreamTls [[akka.stream.scaladsl.BidiFlow]]. This is a low-level interface.
+   *
+   * You can specify a constructor to create an SSLEngine that must already be configured for
+   * client and server mode and with all the parameters for the first session.
+   *
+   * For a description of the `closing` parameter please refer to [[TLSClosing]].
+   */
+  def apply(
+    createSSLEngine: () ⇒ SSLEngine, // we don't offer the internal `ActorSystem => SSLEngine` API here, see #21753
+    closing:         TLSClosing
+  ): scaladsl.BidiFlow[SslTlsOutbound, ByteString, ByteString, SslTlsInbound, NotUsed] =
+    apply(createSSLEngine, _ ⇒ Success(()), closing)
 }
 
 /**

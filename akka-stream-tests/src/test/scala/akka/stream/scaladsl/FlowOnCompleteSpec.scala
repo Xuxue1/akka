@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2014-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2014-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.scaladsl
 
 import akka.Done
@@ -10,7 +11,7 @@ import scala.util.control.NoStackTrace
 import akka.stream.ActorMaterializer
 import akka.stream.ActorMaterializerSettings
 import akka.stream.testkit._
-import akka.stream.testkit.Utils._
+import akka.stream.testkit.scaladsl.StreamTestKit._
 import akka.testkit.TestProbe
 
 class FlowOnCompleteSpec extends StreamSpec with ScriptedTest {
@@ -76,6 +77,18 @@ class FlowOnCompleteSpec extends StreamSpec with ScriptedTest {
       onCompleteProbe.expectMsg("map-42")
       onCompleteProbe.expectMsg("foreach-42")
       onCompleteProbe.expectMsg(Success(Done))
+    }
+
+    "yield error on abrupt termination" in {
+      val mat = ActorMaterializer()
+      val onCompleteProbe = TestProbe()
+      val p = TestPublisher.manualProbe[Int]()
+      Source.fromPublisher(p).to(Sink.onComplete[Int](onCompleteProbe.ref ! _)).run()(mat)
+      val proc = p.expectSubscription()
+      proc.expectRequest()
+      mat.shutdown()
+
+      onCompleteProbe.expectMsgType[Failure[_]]
     }
 
   }

@@ -1,20 +1,16 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.cluster
 
 import com.typesafe.config.ConfigFactory
-import org.scalatest.BeforeAndAfter
-import scala.collection.immutable.SortedSet
-import scala.concurrent.duration._
 import akka.remote.testconductor.RoleName
 import akka.remote.testkit.MultiNodeConfig
 import akka.remote.testkit.MultiNodeSpec
 import akka.testkit._
-import java.util.concurrent.atomic.AtomicReference
-import akka.actor.Props
-import akka.actor.Actor
 import akka.cluster.MemberStatus._
+import akka.util.ccompat.imm._
 
 object MinMembersBeforeUpMultiJvmSpec extends MultiNodeConfig {
   val first = role("first")
@@ -108,8 +104,6 @@ abstract class MinMembersBeforeUpBase(multiNodeConfig: MultiNodeConfig)
   extends MultiNodeSpec(multiNodeConfig)
   with MultiNodeClusterSpec {
 
-  import ClusterEvent._
-
   def first: RoleName
   def second: RoleName
   def third: RoleName
@@ -138,12 +132,12 @@ abstract class MinMembersBeforeUpBase(multiNodeConfig: MultiNodeConfig)
         clusterView.refreshCurrentState()
         clusterView.members.map(_.address) should ===(expectedAddresses)
       }
-      clusterView.members.map(_.status) should ===(Set(Joining))
+      clusterView.members.unsorted.map(_.status) should ===(Set(Joining))
       // and it should not change
       1 to 5 foreach { _ ⇒
         Thread.sleep(1000)
         clusterView.members.map(_.address) should ===(expectedAddresses)
-        clusterView.members.map(_.status) should ===(Set(Joining))
+        clusterView.members.unsorted.map(_.status) should ===(Set(Joining))
       }
     }
     enterBarrier("second-joined")

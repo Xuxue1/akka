@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.util
 
 import java.util.concurrent.atomic.AtomicInteger
@@ -40,7 +41,7 @@ private[akka] final class SerializedSuspendableExecutionContext(throughput: Int)
     val c = state.get
     state.compareAndSet(c, c | newState) || addState(newState)
   }
-  @tailrec private final def remState(oldState: Int) {
+  @tailrec private final def remState(oldState: Int): Unit = {
     val c = state.get
     if (state.compareAndSet(c, c & ~oldState)) attach() else remState(oldState)
   }

@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2014-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2014-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.scaladsl
 
 import akka.NotUsed
@@ -8,6 +9,7 @@ import akka.stream.testkit.StreamSpec
 import akka.stream.testkit.scaladsl.TestSink
 import akka.stream.{ ActorAttributes, ActorMaterializer, ActorMaterializerSettings, Supervision }
 import akka.stream.testkit.Utils._
+import akka.stream.testkit.scaladsl.StreamTestKit._
 
 import scala.collection.immutable
 import scala.concurrent.Await
@@ -71,10 +73,14 @@ class FlowScanSpec extends StreamSpec {
         .expectNext(0)
         .expectComplete()
     }
+
     "fail when upstream failed" in {
-      Source.failed[Int](TE("")).scan(0) { case (a, b) ⇒ a + b }.runWith(TestSink.probe[Int])
+      val ex = TE("")
+      Source.failed[Int](ex)
+        .scan(0) { case (a, b) ⇒ a + b }
+        .runWith(TestSink.probe[Int])
         .request(2)
-        .expectError(TE(""))
+        .expectNextOrError(0, ex)
     }
   }
 }

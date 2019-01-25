@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2016-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.remote.artery
 
 import scala.concurrent.duration._
@@ -8,10 +9,7 @@ import akka.actor._
 import akka.actor.ActorIdentity
 import akka.actor.Identify
 import akka.remote.{ RemotingMultiNodeSpec, QuarantinedEvent, RARP }
-import akka.remote.testconductor.RoleName
 import akka.remote.testkit.MultiNodeConfig
-import akka.remote.testkit.MultiNodeSpec
-import akka.remote.testkit.STMultiNodeSpec
 import akka.remote.transport.ThrottlerTransportAdapter.Direction
 import akka.testkit._
 import com.typesafe.config.ConfigFactory
@@ -25,7 +23,7 @@ object SurviveNetworkPartitionSpec extends MultiNodeConfig {
       akka.loglevel = INFO
       akka.remote.artery.enabled = on
       akka.remote.artery.advanced.give-up-system-message-after = 4s
-      """)).withFallback(RemotingMultiNodeSpec.arteryFlightRecordingConf))
+      """)).withFallback(RemotingMultiNodeSpec.commonConfig))
 
   testTransport(on = true)
 }

@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.util
 
 import java.util.Comparator
@@ -11,6 +12,8 @@ import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.duration.Duration
 import java.util.concurrent.TimeUnit
 import java.util.Locale
+import java.time.{ Instant, ZoneId, LocalDateTime }
+import java.time.format.DateTimeFormatter
 
 object Helpers {
 
@@ -60,6 +63,13 @@ object Helpers {
     val seconds = timeOfDay / 1000L % 60
     val ms = timeOfDay % 1000
     f"$hours%02d:$minutes%02d:$seconds%02d.$ms%03dUTC"
+  }
+
+  private val formatter = DateTimeFormatter.ofPattern("MM/dd/yyyy HH:mm:ss.SSS")
+  private val timeZone = ZoneId.systemDefault()
+
+  def timestamp(time: Long): String = {
+    formatter.format(LocalDateTime.ofInstant(Instant.ofEpochMilli(time), timeZone))
   }
 
   final val base64chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+~"

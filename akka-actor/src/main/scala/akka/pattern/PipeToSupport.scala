@@ -1,15 +1,18 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.pattern
 
 import language.implicitConversions
-import scala.concurrent.{ Future, ExecutionContext }
+import scala.concurrent.{ ExecutionContext, Future }
 import scala.util.{ Failure, Success }
-import akka.actor.{ Status, ActorRef, Actor }
+import akka.actor.{ Actor, ActorRef, Status }
 import akka.actor.ActorSelection
 import java.util.concurrent.CompletionStage
 import java.util.function.BiConsumer
+
+import akka.util.unused
 
 trait PipeToSupport {
 
@@ -38,10 +41,10 @@ trait PipeToSupport {
     }
   }
 
-  final class PipeableCompletionStage[T](val future: CompletionStage[T])(implicit executionContext: ExecutionContext) {
+  final class PipeableCompletionStage[T](val future: CompletionStage[T])(implicit @unused executionContext: ExecutionContext) {
     def pipeTo(recipient: ActorRef)(implicit sender: ActorRef = Actor.noSender): CompletionStage[T] = {
       future whenComplete new BiConsumer[T, Throwable] {
-        override def accept(t: T, ex: Throwable) {
+        override def accept(t: T, ex: Throwable): Unit = {
           if (t != null) recipient ! t
           if (ex != null) recipient ! Status.Failure(ex)
         }
@@ -49,7 +52,7 @@ trait PipeToSupport {
     }
     def pipeToSelection(recipient: ActorSelection)(implicit sender: ActorRef = Actor.noSender): CompletionStage[T] = {
       future whenComplete new BiConsumer[T, Throwable] {
-        override def accept(t: T, ex: Throwable) {
+        override def accept(t: T, ex: Throwable): Unit = {
           if (t != null) recipient ! t
           if (ex != null) recipient ! Status.Failure(ex)
         }
@@ -72,6 +75,7 @@ trait PipeToSupport {
    *
    * {{{
    * import akka.pattern.pipe
+   * // requires implicit ExecutionContext, e.g. by importing `context.dispatcher` inside an Actor
    *
    * Future { doExpensiveCalc() } pipeTo nextActor
    *
@@ -91,6 +95,7 @@ trait PipeToSupport {
    *
    * {{{
    * import akka.pattern.pipe
+   * // requires implicit ExecutionContext, e.g. by importing `context.dispatcher` inside an Actor
    *
    * Future { doExpensiveCalc() } pipeTo nextActor
    *

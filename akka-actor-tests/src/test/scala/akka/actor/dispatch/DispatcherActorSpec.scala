@@ -1,3 +1,7 @@
+/*
+ * Copyright (C) 2018-2019 Lightbend Inc. <https://www.lightbend.com>
+ */
+
 package akka.actor.dispatch
 
 import language.postfixOps
@@ -94,7 +98,7 @@ class DispatcherActorSpec extends AkkaSpec(DispatcherActorSpec.config) with Defa
       latch.await(10, TimeUnit.SECONDS)
       system.stop(fastOne)
       system.stop(slowOne)
-      assert(latch.getCount() === 0)
+      assert(latch.getCount() === 0L)
     }
 
     "respect throughput deadline" in {

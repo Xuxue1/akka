@@ -1,27 +1,34 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.actor
 
 import akka.dispatch.sysmsg._
-import akka.dispatch.{ UnboundedMessageQueueSemantics, RequiresMessageQueue }
+import akka.dispatch.{ RequiresMessageQueue, UnboundedMessageQueueSemantics }
 import akka.routing._
 import akka.event._
-import akka.util.{ Helpers }
+import akka.util.Helpers
 import akka.japi.Util.immutableSeq
 import akka.util.Collections.EmptyImmutableSeq
 import scala.util.control.NonFatal
 import java.util.concurrent.atomic.AtomicLong
+
 import scala.concurrent.{ ExecutionContextExecutor, Future, Promise }
 import scala.annotation.implicitNotFound
+
 import akka.ConfigurationException
+import akka.annotation.DoNotInherit
+import akka.annotation.InternalApi
 import akka.dispatch.Mailboxes
+import akka.serialization.Serialization
+import akka.util.OptionVal
 
 /**
  * Interface for all ActorRef providers to implement.
+ * Not intended for extension outside of Akka.
  */
-trait ActorRefProvider {
+@DoNotInherit trait ActorRefProvider {
 
   /**
    * Reference to the supervisor of guardian and systemGuardian; this is
@@ -63,12 +70,12 @@ trait ActorRefProvider {
   def settings: ActorSystem.Settings
 
   /**
-   * Initialization of an ActorRefProvider happens in two steps: first
+   * INTERNAL API: Initialization of an ActorRefProvider happens in two steps: first
    * construction of the object with settings, eventStream, etc.
    * and then—when the ActorSystem is constructed—the second phase during
    * which actors may be created (e.g. the guardians).
    */
-  def init(system: ActorSystemImpl): Unit
+  private[akka] def init(system: ActorSystemImpl): Unit
 
   /**
    * The Deployer associated with this ActorRefProvider
@@ -86,9 +93,9 @@ trait ActorRefProvider {
   def tempContainer: InternalActorRef
 
   /**
-   * Registers an actorRef at a path returned by tempPath(); do NOT pass in any other path.
+   * INTERNAL API: Registers an actorRef at a path returned by tempPath(); do NOT pass in any other path.
    */
-  def registerTempActor(actorRef: InternalActorRef, path: ActorPath): Unit
+  private[akka] def registerTempActor(actorRef: InternalActorRef, path: ActorPath): Unit
 
   /**
    * Unregister a temporary actor from the “/temp” path (i.e. obtained from tempPath()); do NOT pass in any other path.
@@ -96,7 +103,7 @@ trait ActorRefProvider {
   def unregisterTempActor(path: ActorPath): Unit
 
   /**
-   * Actor factory with create-only semantics: will create an actor as
+   * INTERNAL API: Actor factory with create-only semantics: will create an actor as
    * described by props with the given supervisor and path (may be different
    * in case of remote supervision). If systemService is true, deployment is
    * bypassed (local-only). If ``Some(deploy)`` is passed in, it should be
@@ -104,7 +111,7 @@ trait ActorRefProvider {
    * but it should be overridable from external configuration; the lookup of
    * the latter can be suppressed by setting ``lookupDeploy`` to ``false``.
    */
-  def actorOf(
+  private[akka] def actorOf(
     system:        ActorSystemImpl,
     props:         Props,
     supervisor:    InternalActorRef,
@@ -179,6 +186,9 @@ trait ActorRefProvider {
    * Obtain the external address of the default transport.
    */
   def getDefaultAddress: Address
+
+  /** INTERNAL API */
+  @InternalApi private[akka] def serializationInformation: Serialization.Information
 }
 
 /**
@@ -316,21 +326,6 @@ trait ActorRefFactory {
    * Java API: Look-up an actor by applying the given path elements, starting from the
    * current context, where `".."` signifies the parent of an actor.
    *
-   * Example:
-   * {{{
-   * public class MyActor extends UntypedActor {
-   *   public void onReceive(Object msg) throws Exception {
-   *     ...
-   *     final List<String> path = new ArrayList<String>();
-   *     path.add("..");
-   *     path.add("myBrother");
-   *     path.add("myNephew");
-   *     final ActorRef target = getContext().actorFor(path);
-   *     ...
-   *   }
-   * }
-   * }}}
-   *
    * For maximum performance use a collection with efficient head & tail operations.
    *
    * Actor references acquired with `actorFor` do not always include the full information
@@ -415,7 +410,7 @@ private[akka] object LocalActorRefProvider {
     }
 
     // guardian MUST NOT lose its children during restart
-    override def preRestart(cause: Throwable, msg: Option[Any]) {}
+    override def preRestart(cause: Throwable, msg: Option[Any]): Unit = {}
   }
 
   /**
@@ -462,7 +457,7 @@ private[akka] object LocalActorRefProvider {
       }
 
     // guardian MUST NOT lose its children during restart
-    override def preRestart(cause: Throwable, msg: Option[Any]) {}
+    override def preRestart(cause: Throwable, msg: Option[Any]): Unit = {}
   }
 
 }
@@ -541,7 +536,7 @@ private[akka] class LocalActorRefProvider private[akka] (
     override def !(message: Any)(implicit sender: ActorRef = Actor.noSender): Unit =
       if (isWalking)
         message match {
-          case null ⇒ throw new InvalidMessageException("Message is null")
+          case null ⇒ throw InvalidMessageException("Message is null")
           case _    ⇒ log.error(s"$this received unexpected message [$message]")
         }
 
@@ -658,7 +653,7 @@ private[akka] class LocalActorRefProvider private[akka] (
     tempContainer.removeChild(path.name)
   }
 
-  def init(_system: ActorSystemImpl) {
+  private[akka] def init(_system: ActorSystemImpl): Unit = {
     system = _system
     rootGuardian.start()
     // chain death watchers so that killing guardian stops the application
@@ -704,14 +699,16 @@ private[akka] class LocalActorRefProvider private[akka] (
   def resolveActorRef(path: String): ActorRef = path match {
     case ActorPathExtractor(address, elems) if address == rootPath.address ⇒ resolveActorRef(rootGuardian, elems)
     case _ ⇒
-      log.debug("resolve of unknown path [{}] failed", path)
+      log.debug("Resolve (deserialization) of unknown (invalid) path [{}], using deadLetters.", path)
       deadLetters
   }
 
   def resolveActorRef(path: ActorPath): ActorRef = {
     if (path.root == rootPath) resolveActorRef(rootGuardian, path.elements)
     else {
-      log.debug("resolve of foreign ActorPath [{}] failed", path)
+      log.debug(
+        "Resolve (deserialization) of foreign path [{}] doesn't match root path [{}], using deadLetters.",
+        path, rootPath)
       deadLetters
     }
   }
@@ -721,11 +718,15 @@ private[akka] class LocalActorRefProvider private[akka] (
    */
   private[akka] def resolveActorRef(ref: InternalActorRef, pathElements: Iterable[String]): InternalActorRef =
     if (pathElements.isEmpty) {
-      log.debug("resolve of empty path sequence fails (per definition)")
+      log.debug("Resolve (deserialization) of empty path doesn't match an active actor, using deadLetters.")
       deadLetters
     } else ref.getChild(pathElements.iterator) match {
       case Nobody ⇒
-        log.debug("resolve of path sequence [/{}] failed", pathElements.mkString("/"))
+        if (log.isDebugEnabled)
+          log.debug(
+            "Resolve (deserialization) of path [{}] doesn't match an active actor. " +
+              "It has probably been stopped, using deadLetters.",
+            pathElements.mkString("/"))
         new EmptyLocalActorRef(system.provider, ref.path / pathElements, eventStream)
       case x ⇒ x
     }
@@ -790,7 +791,7 @@ private[akka] class LocalActorRefProvider private[akka] (
           // routers use context.actorOf() to create the routees, which does not allow us to pass
           // these through, but obtain them here for early verification
           val routeeDispatcher = system.dispatchers.lookup(p.dispatcher)
-          val routeeMailbox = system.mailboxes.getMailboxType(routeeProps, routeeDispatcher.configurator.config)
+          system.mailboxes.getMailboxType(routeeProps, routeeDispatcher.configurator.config)
 
           new RoutedActorRef(system, routerProps, routerDispatcher, routerMailbox, routeeProps, supervisor, path).initialize(async)
         } catch {
@@ -804,4 +805,21 @@ private[akka] class LocalActorRefProvider private[akka] (
   def getExternalAddressFor(addr: Address): Option[Address] = if (addr == rootPath.address) Some(addr) else None
 
   def getDefaultAddress: Address = rootPath.address
+
+  // no need for volatile, only intended as cached value, not necessarily a singleton value
+  private var serializationInformationCache: OptionVal[Serialization.Information] = OptionVal.None
+  @InternalApi override private[akka] def serializationInformation: Serialization.Information = {
+    Serialization.Information(getDefaultAddress, system)
+    serializationInformationCache match {
+      case OptionVal.Some(info) ⇒ info
+      case OptionVal.None ⇒
+        if (system eq null)
+          throw new IllegalStateException("Too early access of serializationInformation")
+        else {
+          val info = Serialization.Information(rootPath.address, system)
+          serializationInformationCache = OptionVal.Some(info)
+          info
+        }
+    }
+  }
 }

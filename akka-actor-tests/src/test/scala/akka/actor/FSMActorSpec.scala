@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.actor
@@ -235,7 +235,7 @@ class FSMActorSpec extends AkkaSpec(Map("akka.actor.debug.fsm" → true)) with I
         }
       })
 
-      def checkTimersActive(active: Boolean) {
+      def checkTimersActive(active: Boolean): Unit = {
         for (timer ← timerNames) fsmref.isTimerActive(timer) should ===(active)
         fsmref.isStateTimerActive should ===(active)
       }
@@ -337,7 +337,7 @@ class FSMActorSpec extends AkkaSpec(Map("akka.actor.debug.fsm" → true)) with I
       expectMsg(Transition(fsmref, 0, 1))
     }
 
-    "allow cancelling stateTimeout by issuing forMax(Duration.Inf)" in {
+    "allow cancelling stateTimeout by issuing forMax(Duration.Inf)" taggedAs TimingTest in {
       val sys = ActorSystem("fsmEvent")
       val p = TestProbe()(sys)
 
@@ -347,7 +347,7 @@ class FSMActorSpec extends AkkaSpec(Map("akka.actor.debug.fsm" → true)) with I
 
         startWith("init", "")
 
-        when("init", stateTimeout = 1.second) {
+        when("init", stateTimeout = 300.millis) {
           case Event(StateTimeout, _) ⇒
             p.ref ! StateTimeout
             stay()
@@ -365,7 +365,7 @@ class FSMActorSpec extends AkkaSpec(Map("akka.actor.debug.fsm" → true)) with I
 
         fsm ! OverrideTimeoutToInf
         p.expectMsg(OverrideTimeoutToInf)
-        p.expectNoMsg(3.seconds)
+        p.expectNoMsg(1.seconds)
       } finally {
         TestKit.shutdownActorSystem(sys)
       }

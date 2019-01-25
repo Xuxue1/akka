@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.remote
 
 import akka.testkit.AkkaSpec
@@ -57,7 +58,7 @@ class TypedActorRemoteDeploySpec extends AkkaSpec(conf) {
 
   }
 
-  override def afterTermination() {
+  override def afterTermination(): Unit = {
     shutdown(remoteSystem)
   }
 

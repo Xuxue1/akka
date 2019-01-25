@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2016-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.util
 
 import java.util
@@ -45,7 +46,7 @@ class LruBoundedCacheBench {
     }
 
     // Loading
-    for (i <- 1 to threshold) {
+    for (i ← 1 to threshold) {
       val value = random.nextString(stringSize)
       if (i == 1) toGet = value
       toRemove = value

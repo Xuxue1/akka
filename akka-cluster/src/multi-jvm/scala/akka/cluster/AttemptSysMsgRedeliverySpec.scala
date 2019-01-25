@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.cluster
 
 import scala.concurrent.duration._
@@ -11,7 +12,7 @@ import akka.actor.Identify
 import akka.actor.Props
 import akka.remote.transport.ThrottlerTransportAdapter.Direction
 import akka.testkit._
-import akka.remote.testkit.{ STMultiNodeSpec, MultiNodeConfig, MultiNodeSpec }
+import akka.remote.testkit.{ MultiNodeConfig, MultiNodeSpec }
 import akka.actor.PoisonPill
 
 object AttemptSysMsgRedeliveryMultiJvmSpec extends MultiNodeConfig {

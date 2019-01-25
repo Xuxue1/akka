@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.cluster
 
 import org.scalatest.WordSpec
@@ -10,33 +11,34 @@ import akka.actor.Address
 class ReachabilityPerfSpec extends WordSpec with Matchers {
 
   val nodesSize = sys.props.get("akka.cluster.ReachabilityPerfSpec.nodesSize").getOrElse("250").toInt
-  val iterations = sys.props.get("akka.cluster.ReachabilityPerfSpec.iterations").getOrElse("10000").toInt
+  // increase for serious measurements
+  val iterations = sys.props.get("akka.cluster.ReachabilityPerfSpec.iterations").getOrElse("100").toInt
 
   val address = Address("akka.tcp", "sys", "a", 2552)
   val node = Address("akka.tcp", "sys", "a", 2552)
 
   private def createReachabilityOfSize(base: Reachability, size: Int): Reachability =
-    (base /: (1 to size)) {
+    (1 to size).foldLeft(base) {
       case (r, i) ⇒
-        val observer = UniqueAddress(address.copy(host = Some("node-" + i)), i)
+        val observer = UniqueAddress(address.copy(host = Some("node-" + i)), i.toLong)
         val j = if (i == size) 1 else i + 1
-        val subject = UniqueAddress(address.copy(host = Some("node-" + j)), j)
+        val subject = UniqueAddress(address.copy(host = Some("node-" + j)), j.toLong)
         r.unreachable(observer, subject).reachable(observer, subject)
     }
 
   private def addUnreachable(base: Reachability, count: Int): Reachability = {
-    val observers = base.allObservers.take(count)
-    val subjects = Stream.continually(base.allObservers).flatten.iterator
-    (base /: observers) {
+    val observers = base.versions.keySet.take(count)
+    val subjects = Stream.continually(base.versions.keySet).flatten.iterator
+    observers.foldLeft(base) {
       case (r, o) ⇒
-        (r /: (1 to 5)) { case (r, _) ⇒ r.unreachable(o, subjects.next()) }
+        (1 to 5).foldLeft(r) { case (r, _) ⇒ r.unreachable(o, subjects.next()) }
     }
   }
 
   val reachability1 = createReachabilityOfSize(Reachability.empty, nodesSize)
   val reachability2 = createReachabilityOfSize(reachability1, nodesSize)
   val reachability3 = addUnreachable(reachability1, nodesSize / 2)
-  val allowed = reachability1.allObservers
+  val allowed = reachability1.versions.keySet
 
   private def checkThunkFor(r1: Reachability, r2: Reachability, thunk: (Reachability, Reachability) ⇒ Unit, times: Int): Unit = {
     for (i ← 1 to times) {

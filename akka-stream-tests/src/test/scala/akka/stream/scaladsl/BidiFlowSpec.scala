@@ -1,11 +1,12 @@
-/**
- * Copyright (C) 2015-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2015-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.scaladsl
 
 import akka.NotUsed
 import akka.stream.testkit.StreamSpec
-import akka.stream.testkit.Utils._
+import akka.stream.testkit.scaladsl.StreamTestKit._
 import akka.util.ByteString
 import akka.stream._
 import scala.concurrent.Await
@@ -48,7 +49,7 @@ class BidiFlowSpec extends StreamSpec {
         ClosedShape
       }).run()
 
-      Await.result(top, 1.second) should ===(3)
+      Await.result(top, 1.second) should ===(3L)
       Await.result(bottom, 1.second) should ===(str)
     }
 
@@ -110,8 +111,8 @@ class BidiFlowSpec extends StreamSpec {
       import Attributes._
       val b: BidiFlow[Int, Long, ByteString, String, NotUsed] = bidi.async.addAttributes(none).named("name")
 
-      b.module.attributes.getFirst[Name] shouldEqual Some(Name("name"))
-      b.module.attributes.getFirst[AsyncBoundary.type] shouldEqual Some(AsyncBoundary)
+      b.traversalBuilder.attributes.getFirst[Name] shouldEqual Some(Name("name"))
+      b.traversalBuilder.attributes.getFirst[AsyncBoundary.type] shouldEqual Some(AsyncBoundary)
     }
 
   }

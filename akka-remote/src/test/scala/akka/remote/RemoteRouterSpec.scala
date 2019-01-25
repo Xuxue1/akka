@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.remote
 
 import scala.collection.immutable
@@ -20,8 +21,10 @@ object RemoteRouterSpec {
   }
 }
 
-class RemoteRouterSpec extends AkkaSpec("""
+class RemoteRouterSpec extends AkkaSpec(s"""
     akka.actor.provider = remote
+    akka.actor.allow-java-serialization = off
+    akka.actor.serialize-messages = off
     akka.remote.netty.tcp {
       hostname = localhost
       port = 0
@@ -45,6 +48,7 @@ class RemoteRouterSpec extends AkkaSpec("""
 
   val port = system.asInstanceOf[ExtendedActorSystem].provider.getDefaultAddress.port.get
   val sysName = system.name
+  val masterSystemName = "Master" + sysName
   val protocol =
     if (RARP(system).provider.remoteSettings.Artery.Enabled) "akka"
     else "akka.tcp"
@@ -71,7 +75,7 @@ class RemoteRouterSpec extends AkkaSpec("""
           nr-of-instances = 2
         }
         /local-blub {
-          remote = "akka://MasterRemoteRouterSpec"
+          remote = "akka://$masterSystemName"
           router = round-robin-pool
           nr-of-instances = 2
           target.nodes = ["$protocol://${sysName}@localhost:${port}"]
@@ -83,9 +87,9 @@ class RemoteRouterSpec extends AkkaSpec("""
         }
       }
     }""").withFallback(system.settings.config)
-  val masterSystem = ActorSystem("Master" + sysName, conf)
+  val masterSystem = ActorSystem(masterSystemName, conf)
 
-  override def afterTermination() {
+  override def afterTermination(): Unit = {
     shutdown(masterSystem)
   }
 
@@ -168,7 +172,7 @@ class RemoteRouterSpec extends AkkaSpec("""
       val probe = TestProbe()(masterSystem)
       val router = masterSystem.actorOf(RoundRobinPool(2).props(echoActorProps)
         .withDeploy(Deploy(scope = RemoteScope(AddressFromURIString(s"$protocol://${sysName}@localhost:${port}")))), "local-blub")
-      router.path.address.toString should ===("akka://MasterRemoteRouterSpec")
+      router.path.address.toString should ===(s"akka://$masterSystemName")
       val replies = collectRouteePaths(probe, router, 5)
       val children = replies.toSet
       children should have size 2

@@ -1,28 +1,30 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.remote.transport
 
 import akka.actor._
 import akka.pattern.{ PromiseActorRef, ask, pipe }
 import akka.remote.transport.ActorTransportAdapter.AssociateUnderlying
 import akka.remote.transport.AkkaPduCodec.Associate
-import akka.remote.transport.AssociationHandle.{ DisassociateInfo, ActorHandleEventListener, Disassociated, InboundPayload, HandleEventListener }
-import akka.remote.transport.ThrottlerManager.{ Listener, Handle, ListenerAndMode, Checkin }
+import akka.remote.transport.AssociationHandle.{ ActorHandleEventListener, DisassociateInfo, Disassociated, HandleEventListener, InboundPayload }
+import akka.remote.transport.ThrottlerManager.{ Checkin, Handle, Listener, ListenerAndMode }
 import akka.remote.transport.ThrottlerTransportAdapter._
 import akka.remote.transport.Transport._
-import akka.util.{ Timeout, ByteString }
+import akka.util.{ ByteString, Timeout }
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
+
 import scala.annotation.tailrec
 import scala.collection.immutable.Queue
 import scala.concurrent.{ Future, Promise }
 import scala.concurrent.duration._
 import scala.math.min
-import scala.util.{ Success, Failure }
+import scala.util.{ Failure, Success }
 import scala.util.control.NonFatal
 import akka.dispatch.sysmsg.{ Unwatch, Watch }
-import akka.dispatch.{ UnboundedMessageQueueSemantics, RequiresMessageQueue }
+import akka.dispatch.{ RequiresMessageQueue, UnboundedMessageQueueSemantics }
 import akka.remote.RARP
 
 class ThrottlerProvider extends TransportAdapterProvider {
@@ -163,6 +165,31 @@ object ThrottlerTransportAdapter {
      */
     def getInstance = this
   }
+
+  /**
+   * Java API: get the Direction.Send instance
+   */
+  def sendDirection(): Direction = Direction.Send
+
+  /**
+   * Java API: get the Direction.Receive instance
+   */
+  def receiveDirection(): Direction = Direction.Receive
+
+  /**
+   * Java API: get the Direction.Both instance
+   */
+  def bothDirection(): Direction = Direction.Both
+
+  /**
+   * Java API: get the ThrottleMode.Blackhole instance
+   */
+  def blackholeThrottleMode(): ThrottleMode = Blackhole
+
+  /**
+   * Java API: get the ThrottleMode.Unthrottled instance
+   */
+  def unthrottledThrottleMode(): ThrottleMode = Unthrottled
 }
 
 class ThrottlerTransportAdapter(_wrappedTransport: Transport, _system: ExtendedActorSystem) extends ActorTransportAdapter(_wrappedTransport, _system) {
@@ -205,7 +232,8 @@ private[transport] object ThrottlerManager {
 /**
  * INTERNAL API
  */
-private[transport] class ThrottlerManager(wrappedTransport: Transport) extends ActorTransportAdapterManager {
+private[transport] class ThrottlerManager(wrappedTransport: Transport)
+  extends ActorTransportAdapterManager with ActorLogging {
 
   import ThrottlerManager._
   import context.dispatcher
@@ -245,7 +273,7 @@ private[transport] class ThrottlerManager(wrappedTransport: Transport) extends A
     case ForceDisassociate(address) ⇒
       val naked = nakedAddress(address)
       handleTable foreach {
-        case (`naked`, handle) ⇒ handle.disassociate()
+        case (`naked`, handle) ⇒ handle.disassociate(s"the disassociation was forced by ${sender()}", log)
         case _                 ⇒
       }
       sender() ! ForceDisassociateAck
@@ -373,7 +401,7 @@ private[transport] class ThrottledAssociation(
   var throttledMessages = Queue.empty[ByteString]
   var upstreamListener: HandleEventListener = _
 
-  override def postStop(): Unit = originalHandle.disassociate()
+  override def postStop(): Unit = originalHandle.disassociate("the owning ThrottledAssociation stopped", log)
 
   if (inbound) startWith(WaitExposedHandle, Uninitialized) else {
     originalHandle.readHandlerPromise.success(ActorHandleEventListener(self))
@@ -406,7 +434,7 @@ private[transport] class ThrottledAssociation(
       inboundThrottleMode = mode
       try if (mode == Blackhole) {
         throttledMessages = Queue.empty[ByteString]
-        exposedHandle.disassociate()
+        exposedHandle.disassociate("the association was blackholed", log)
         stop()
       } else {
         associationHandler notify InboundAssociation(exposedHandle)
@@ -468,7 +496,7 @@ private[transport] class ThrottledAssociation(
       inboundThrottleMode = mode
       sender() ! SetThrottleAck
       stay()
-    case Event(Disassociated(info), _) ⇒
+    case Event(Disassociated(_), _) ⇒
       stop() // not notifying the upstream handler is intentional: we are relying on heartbeating
     case Event(FailWith(reason), _) ⇒
       if (upstreamListener ne null) upstreamListener notify Disassociated(reason)
@@ -485,7 +513,7 @@ private[transport] class ThrottledAssociation(
     } catch {
       // This layer should not care about malformed packets. Also, this also useful for testing, because
       // arbitrary payload could be passed in
-      case NonFatal(e) ⇒ None
+      case NonFatal(_) ⇒ None
     }
   }
 
@@ -549,9 +577,7 @@ private[transport] final case class ThrottlerHandle(_wrappedHandle: AssociationH
 
   }
 
-  override def disassociate(): Unit = {
-    throttlerActor ! PoisonPill
-  }
+  override def disassociate(): Unit = throttlerActor ! PoisonPill
 
   def disassociateWithFailure(reason: DisassociateInfo): Unit = {
     throttlerActor ! ThrottledAssociation.FailWith(reason)

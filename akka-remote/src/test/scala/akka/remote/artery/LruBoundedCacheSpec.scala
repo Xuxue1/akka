@@ -1,9 +1,11 @@
-/**
- * Copyright (C) 2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2016-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.remote.artery
 
 import akka.testkit.AkkaSpec
+import akka.util.Unsafe
 
 import scala.util.Random
 
@@ -17,7 +19,8 @@ class LruBoundedCacheSpec extends AkkaSpec {
       cntr += 1
       k + ":" + id
     }
-    override protected def hash(k: String): Int = FastHash.ofString(hashSeed + k + hashSeed)
+
+    override protected def hash(k: String): Int = Unsafe.fastHash(hashSeed + k + hashSeed)
 
     override protected def isCacheable(v: String): Boolean = !v.startsWith("#")
 

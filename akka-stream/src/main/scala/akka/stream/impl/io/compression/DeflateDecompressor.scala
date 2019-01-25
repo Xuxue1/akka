@@ -1,30 +1,31 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.impl.io.compression
 
 import java.util.zip.Inflater
 
+import akka.annotation.InternalApi
 import akka.stream.Attributes
-import akka.stream.impl.io.ByteStringParser
-import akka.stream.impl.io.ByteStringParser.{ ParseResult, ParseStep }
-import akka.util.ByteString
 
 /** INTERNAL API */
-private[akka] class DeflateDecompressor(maxBytesPerChunk: Int = DeflateDecompressorBase.MaxBytesPerChunkDefault)
+@InternalApi private[akka] class DeflateDecompressor(maxBytesPerChunk: Int, nowrap: Boolean)
   extends DeflateDecompressorBase(maxBytesPerChunk) {
 
-  override def createLogic(attr: Attributes) = new DecompressorParsingLogic {
-    override val inflater: Inflater = new Inflater()
+  def this(maxBytesPerChunk: Int) = this(maxBytesPerChunk, false) // for binary compatibility
 
-    override val inflateState = new Inflate(true) {
+  override def createLogic(attr: Attributes) = new DecompressorParsingLogic {
+    override val inflater: Inflater = new Inflater(nowrap)
+
+    override case object inflating extends Inflate(noPostProcessing = true) {
       override def onTruncation(): Unit = completeStage()
     }
 
-    override def afterInflate = inflateState
+    override def afterInflate = inflating
     override def afterBytesRead(buffer: Array[Byte], offset: Int, length: Int): Unit = {}
 
-    startWith(inflateState)
+    startWith(inflating)
   }
 }
 

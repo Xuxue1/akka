@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2015-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2015-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.cluster.singleton.protobuf
 
 import akka.actor.ExtendedActorSystem
@@ -11,6 +12,7 @@ import akka.cluster.singleton.ClusterSingletonManager.Internal.TakeOverFromMe
 import akka.serialization.BaseSerializer
 import akka.serialization.SerializationExtension
 import akka.serialization.SerializerWithStringManifest
+import java.io.NotSerializableException
 
 /**
  * INTERNAL API: Serializer of ClusterSingleton messages.
@@ -56,7 +58,7 @@ private[akka] class ClusterSingletonMessageSerializer(val system: ExtendedActorS
   override def fromBinary(bytes: Array[Byte], manifest: String): AnyRef =
     fromBinaryMap.get(manifest) match {
       case Some(f) ⇒ f(bytes)
-      case None ⇒ throw new IllegalArgumentException(
+      case None ⇒ throw new NotSerializableException(
         s"Unimplemented deserialization of message with manifest [$manifest] in [${getClass.getName}]")
     }
 

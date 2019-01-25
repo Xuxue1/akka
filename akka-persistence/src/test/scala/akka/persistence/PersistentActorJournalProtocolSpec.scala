@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2016-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.persistence
 
 import akka.actor._
@@ -74,7 +75,14 @@ akka.persistence.snapshot-store.plugin = "akka.persistence.no-snapshot-store"
   }
 }
 
-object JournalPuppet extends ExtensionKey[JournalProbe]
+object JournalPuppet extends ExtensionId[JournalProbe] with ExtensionIdProvider {
+  override def lookup() = JournalPuppet
+
+  override def createExtension(system: ExtendedActorSystem): JournalProbe =
+    new JournalProbe()(system)
+
+  override def get(system: ActorSystem): JournalProbe = super.get(system)
+}
 class JournalProbe(implicit private val system: ExtendedActorSystem) extends Extension {
   val probe = TestProbe()
   val ref = probe.ref

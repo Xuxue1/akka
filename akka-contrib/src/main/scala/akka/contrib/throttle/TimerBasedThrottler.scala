@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.contrib.throttle
@@ -17,6 +17,7 @@ import java.util.concurrent.TimeUnit
  * @see [[akka.contrib.throttle.Throttler.SetRate]]
  * @see [[akka.contrib.throttle.Throttler.SetTarget]]
  */
+@deprecated("Use streams, see migration guide", "2.5.0")
 object Throttler {
   /**
    * A rate used for throttling.
@@ -214,16 +215,19 @@ private[throttle] object TimerBasedThrottler {
  *
  * @see [[akka.contrib.throttle.Throttler]]
  */
+@deprecated("Use streams, see migration guide", "2.5.0")
 class TimerBasedThrottler(var rate: Rate) extends Actor with FSM[State, Data] {
   import FSM.`→`
+
+  this.rate = normalizedRate(rate)
 
   startWith(Idle, Data(None, rate.numberOfCalls, Q()))
 
   // Idle: no messages, or target not set
   when(Idle) {
     // Set the rate
-    case Event(SetRate(rate), d) ⇒
-      this.rate = rate
+    case Event(SetRate(newRate), d) ⇒
+      this.rate = normalizedRate(newRate)
       stay using d.copy(callsLeftInThisPeriod = rate.numberOfCalls)
 
     // Set the target
@@ -242,8 +246,8 @@ class TimerBasedThrottler(var rate: Rate) extends Actor with FSM[State, Data] {
 
   when(Active) {
     // Set the rate
-    case Event(SetRate(rate), d) ⇒
-      this.rate = rate
+    case Event(SetRate(newRate), d) ⇒
+      this.rate = normalizedRate(newRate)
       // Note: this should be improved (see "Known issues" in class comments)
       stopTimer()
       startTimer(rate)
@@ -288,6 +292,18 @@ class TimerBasedThrottler(var rate: Rate) extends Actor with FSM[State, Data] {
 
   private def startTimer(rate: Rate) = setTimer("morePermits", Tick, rate.duration, true)
   private def stopTimer() = cancelTimer("morePermits")
+
+  // Rate.numberOfCalls is an integer. So, the finest granularity of timing (i.e., highest
+  // precision) is achieved when it equals 1. So, the following function normalizes
+  // a Rate to 1 numberOfCall per calculated unit time.
+  private def normalizedRate(rate: Rate): Rate = {
+    // If number of calls is zero then we don't need to do anything
+    if (rate.numberOfCalls == 0) {
+      rate
+    } else {
+      Rate(1, FiniteDuration(rate.duration.toNanos / rate.numberOfCalls, TimeUnit.NANOSECONDS))
+    }
+  }
 
   /**
    * Send as many messages as we can (while respecting the rate) to the target and

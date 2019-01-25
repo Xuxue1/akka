@@ -1,17 +1,19 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.remote.transport
 
 import FailureInjectorTransportAdapter._
 import akka.AkkaException
 import akka.actor.{ Address, ExtendedActorSystem }
-import akka.event.Logging
+import akka.event.{ Logging, LoggingAdapter }
 import akka.remote.transport.AssociationHandle.{ HandleEvent, HandleEventListener }
 import akka.remote.transport.Transport._
 import akka.util.ByteString
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ThreadLocalRandom
+
 import scala.concurrent.{ Future, Promise }
 import scala.util.control.NoStackTrace
 
@@ -81,11 +83,11 @@ private[remote] class FailureInjectorTransportAdapter(wrappedTransport: Transpor
     listenAddress:  Address,
     listenerFuture: Future[AssociationEventListener]): Future[AssociationEventListener] = {
     log.warning("FailureInjectorTransport is active on this system. Gremlins might munch your packets.")
-    listenerFuture.onSuccess {
+    listenerFuture.foreach {
       // Side effecting: As this class is not an actor, the only way to safely modify state is through volatile vars.
       // Listen is called only during the initialization of the stack, and upstreamListener is not read before this
       // finishes.
-      case listener: AssociationEventListener ⇒ upstreamListener = Some(listener)
+      listener ⇒ upstreamListener = Some(listener)
     }
     Future.successful(this)
   }
@@ -151,8 +153,8 @@ private[remote] final case class FailureInjectorHandle(
   @volatile private var upstreamListener: HandleEventListener = null
 
   override val readHandlerPromise: Promise[HandleEventListener] = Promise()
-  readHandlerPromise.future.onSuccess {
-    case listener: HandleEventListener ⇒
+  readHandlerPromise.future.foreach {
+    listener ⇒
       upstreamListener = listener
       wrappedHandle.readHandlerPromise.success(this)
   }
@@ -161,7 +163,11 @@ private[remote] final case class FailureInjectorHandle(
     if (!gremlinAdapter.shouldDropOutbound(wrappedHandle.remoteAddress, payload, "handler.write")) wrappedHandle.write(payload)
     else true
 
-  override def disassociate(): Unit = wrappedHandle.disassociate()
+  override def disassociate(reason: String, log: LoggingAdapter): Unit =
+    wrappedHandle.disassociate(reason, log)
+
+  override def disassociate(): Unit =
+    wrappedHandle.disassociate()
 
   override def notify(ev: HandleEvent): Unit =
     if (!gremlinAdapter.shouldDropInbound(wrappedHandle.remoteAddress, ev, "handler.notify"))

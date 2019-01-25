@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.cluster
 
 import scala.collection.immutable
@@ -22,6 +23,7 @@ import akka.remote.testkit.MultiNodeConfig
 import akka.remote.testkit.MultiNodeSpec
 import akka.testkit._
 import com.typesafe.config.ConfigFactory
+import akka.util.ccompat.imm._
 
 object RestartNodeMultiJvmSpec extends MultiNodeConfig {
   val first = role("first")
@@ -31,6 +33,7 @@ object RestartNodeMultiJvmSpec extends MultiNodeConfig {
   commonConfig(debugConfig(on = false).
     withFallback(ConfigFactory.parseString("""
       akka.cluster.auto-down-unreachable-after = 5s
+      akka.cluster.allow-weakly-up-members = off
       #akka.remote.use-passive-connections = off
       """)).
     withFallback(MultiNodeClusterSpec.clusterConfig))
@@ -71,8 +74,10 @@ abstract class RestartNodeSpec
 
   lazy val restartedSecondSystem = ActorSystem(
     system.name,
-    ConfigFactory.parseString("akka.remote.netty.tcp.port=" + secondUniqueAddress.address.port.get).
-      withFallback(system.settings.config))
+    ConfigFactory.parseString(s"""
+      akka.remote.netty.tcp.port = ${secondUniqueAddress.address.port.get}
+      akka.remote.artery.canonical.port = ${secondUniqueAddress.address.port.get}
+      """).withFallback(system.settings.config))
 
   override def afterAll(): Unit = {
     runOn(second) {
@@ -107,7 +112,7 @@ abstract class RestartNodeSpec
           expectMsg(5.seconds, "ok")
         }
       }
-      enterBarrier("second-address-transfered")
+      enterBarrier("second-address-transferred")
 
       // now we can join first, secondSystem, third together
       runOn(first, third) {
@@ -117,7 +122,7 @@ abstract class RestartNodeSpec
       runOn(second) {
         Cluster(secondSystem).joinSeedNodes(seedNodes)
         awaitAssert(Cluster(secondSystem).readView.members.size should ===(3))
-        awaitAssert(Cluster(secondSystem).readView.members.map(_.status) should ===(Set(Up)))
+        awaitAssert(Cluster(secondSystem).readView.members.unsorted.map(_.status) should ===(Set(Up)))
       }
       enterBarrier("started")
 
@@ -135,7 +140,7 @@ abstract class RestartNodeSpec
       runOn(second) {
         Cluster(restartedSecondSystem).joinSeedNodes(seedNodes)
         awaitAssert(Cluster(restartedSecondSystem).readView.members.size should ===(3))
-        awaitAssert(Cluster(restartedSecondSystem).readView.members.map(_.status) should ===(Set(Up)))
+        awaitAssert(Cluster(restartedSecondSystem).readView.members.unsorted.map(_.status) should ===(Set(Up)))
       }
       runOn(first, third) {
         awaitAssert {

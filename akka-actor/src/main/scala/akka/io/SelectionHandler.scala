@@ -1,26 +1,30 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.io
 
 import java.util.{ Iterator ⇒ JIterator }
 import java.util.concurrent.atomic.AtomicBoolean
-import java.nio.channels.{ SelectableChannel, SelectionKey, CancelledKeyException }
+import java.nio.channels.{ CancelledKeyException, SelectableChannel, SelectionKey }
 import java.nio.channels.SelectionKey._
 import java.nio.channels.spi.SelectorProvider
+
 import com.typesafe.config.Config
+
 import scala.annotation.tailrec
 import scala.util.control.NonFatal
 import scala.concurrent.ExecutionContext
 import akka.event.LoggingAdapter
-import akka.dispatch.{ UnboundedMessageQueueSemantics, RequiresMessageQueue }
+import akka.dispatch.{ RequiresMessageQueue, UnboundedMessageQueueSemantics }
 import akka.util.Helpers.Requiring
 import akka.util.SerializedSuspendableExecutionContext
 import akka.actor._
 import akka.routing.RandomPool
 import akka.event.Logging
 import java.nio.channels.ClosedChannelException
+
+import scala.util.Try
 
 abstract class SelectionHandlerSettings(config: Config) {
   import config._
@@ -47,7 +51,7 @@ private[io] trait ChannelRegistry {
    * Registers the given channel with the selector, creates a ChannelRegistration instance for it
    * and dispatches it back to the channelActor calling this `register`
    */
-  def register(channel: SelectableChannel, initialOps: Int)(implicit channelActor: ActorRef)
+  def register(channel: SelectableChannel, initialOps: Int)(implicit channelActor: ActorRef): Unit
 }
 
 /**
@@ -56,11 +60,23 @@ private[io] trait ChannelRegistry {
  * Enables a channel actor to directly schedule interest setting tasks to the selector management dispatcher.
  */
 private[io] trait ChannelRegistration extends NoSerializationVerificationNeeded {
-  def enableInterest(op: Int)
-  def disableInterest(op: Int)
+  def enableInterest(op: Int): Unit
+  def disableInterest(op: Int): Unit
+
+  /**
+   * Explicitly cancel the registration and close the underlying channel. Then run the given `andThen` method.
+   * The `andThen` method is run from another thread so make sure it's safe to execute from there.
+   */
+  def cancelAndClose(andThen: () ⇒ Unit): Unit
 }
 
 private[io] object SelectionHandler {
+  // Let select return every MaxSelectMillis which will automatically cleanup stale entries in the selection set.
+  // Otherwise, an idle Selector might block for a long time keeping a reference to the dead connection actor's ActorRef
+  // which might keep other stuff in memory.
+  // See https://github.com/akka/akka/issues/23437
+  // As this is basic house-keeping functionality it doesn't seem useful to make the value configurable.
+  val MaxSelectMillis = 10000 // wake up once in 10 seconds
 
   trait HasFailureMessage {
     def failureMessage: Any
@@ -104,7 +120,7 @@ private[io] object SelectionHandler {
         } else super.logFailure(context, child, cause, decision)
     }
 
-  private class ChannelRegistryImpl(executionContext: ExecutionContext, log: LoggingAdapter) extends ChannelRegistry {
+  private class ChannelRegistryImpl(executionContext: ExecutionContext, settings: SelectionHandlerSettings, log: LoggingAdapter) extends ChannelRegistry {
     private[this] val selector = SelectorProvider.provider.openSelector
     private[this] val wakeUp = new AtomicBoolean(false)
 
@@ -112,7 +128,7 @@ private[io] object SelectionHandler {
 
     private[this] val select = new Task {
       def tryRun(): Unit = {
-        if (selector.select() > 0) { // This assumes select return value == selectedKeys.size
+        if (selector.select(MaxSelectMillis) > 0) { // This assumes select return value == selectedKeys.size
           val keys = selector.selectedKeys
           val iterator = keys.iterator()
           while (iterator.hasNext) {
@@ -151,14 +167,19 @@ private[io] object SelectionHandler {
 
     executionContext.execute(select) // start selection "loop"
 
-    def register(channel: SelectableChannel, initialOps: Int)(implicit channelActor: ActorRef): Unit =
+    def register(channel: SelectableChannel, initialOps: Int)(implicit channelActor: ActorRef): Unit = {
+      if (settings.TraceLogging) log.debug(s"Scheduling Registering channel $channel with initialOps $initialOps")
       execute {
         new Task {
           def tryRun(): Unit = try {
+            if (settings.TraceLogging) log.debug(s"Registering channel $channel with initialOps $initialOps")
             val key = channel.register(selector, initialOps, channelActor)
             channelActor ! new ChannelRegistration {
               def enableInterest(ops: Int): Unit = enableInterestOps(key, ops)
+
               def disableInterest(ops: Int): Unit = disableInterestOps(key, ops)
+
+              def cancelAndClose(andThen: () ⇒ Unit): Unit = cancelKeyAndClose(key, andThen)
             }
           } catch {
             case _: ClosedChannelException ⇒
@@ -166,6 +187,7 @@ private[io] object SelectionHandler {
           }
         }
       }
+    }
 
     def shutdown(): Unit =
       execute {
@@ -188,10 +210,38 @@ private[io] object SelectionHandler {
       execute {
         new Task {
           def tryRun(): Unit = {
+            if (settings.TraceLogging) log.debug(s"Enabling $ops on $key")
             val currentOps = key.interestOps
             val newOps = currentOps | ops
             if (newOps != currentOps) key.interestOps(newOps)
           }
+        }
+      }
+
+    private def cancelKeyAndClose(key: SelectionKey, andThen: () ⇒ Unit): Unit =
+      execute {
+        new Task {
+          def tryRun(): Unit = {
+            Try(key.cancel())
+            Try(key.channel().close())
+
+            // In JDK 11 (and for Windows also in previous JDKs), it is necessary to completely flush a cancelled / closed channel
+            // from the selector to close a channel completely on the OS level.
+            // We want select to be called before we call the thunk, so we schedule the thunk here which will run it
+            // after the next select call.
+            // (It's tempting to just call `selectNow` here, instead of registering the thunk, but that can mess up
+            // the wakeUp state of the selector leading to selection operations being stuck behind the next selection
+            // until that returns regularly the next time.)
+
+            runThunk(andThen)
+          }
+        }
+      }
+
+    private def runThunk(andThen: () ⇒ Unit): Unit =
+      execute {
+        new Task {
+          def tryRun(): Unit = andThen()
         }
       }
 
@@ -214,8 +264,8 @@ private[io] object SelectionHandler {
 
     // FIXME: Add possibility to signal failure of task to someone
     private abstract class Task extends Runnable {
-      def tryRun()
-      def run() {
+      def tryRun(): Unit
+      def run(): Unit = {
         try tryRun()
         catch {
           case _: CancelledKeyException ⇒ // ok, can be triggered while setting interest ops
@@ -231,11 +281,11 @@ private[io] class SelectionHandler(settings: SelectionHandlerSettings) extends A
   import SelectionHandler._
   import settings._
 
-  private[this] var sequenceNumber = 0
+  private[this] var sequenceNumber = 0L // should be Long to prevent overflow
   private[this] var childCount = 0
   private[this] val registry = {
     val dispatcher = context.system.dispatchers.lookup(SelectorDispatcher)
-    new ChannelRegistryImpl(SerializedSuspendableExecutionContext(dispatcher.throughput)(dispatcher), log)
+    new ChannelRegistryImpl(SerializedSuspendableExecutionContext(dispatcher.throughput)(dispatcher), settings, log)
   }
 
   def receive: Receive = {

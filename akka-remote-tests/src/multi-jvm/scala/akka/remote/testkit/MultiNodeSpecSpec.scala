@@ -1,13 +1,14 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.remote.testkit
 
 import akka.remote.RemotingMultiNodeSpec
 import akka.testkit.LongRunningTest
 
 object MultiNodeSpecMultiJvmSpec extends MultiNodeConfig {
-  commonConfig(debugConfig(on = false).withFallback(RemotingMultiNodeSpec.arteryFlightRecordingConf))
+  commonConfig(debugConfig(on = false).withFallback(RemotingMultiNodeSpec.commonConfig))
 
   val node1 = role("node1")
   val node2 = role("node2")
@@ -21,8 +22,6 @@ class MultiNodeSpecSpecMultiJvmNode3 extends MultiNodeSpecSpec
 class MultiNodeSpecSpecMultiJvmNode4 extends MultiNodeSpecSpec
 
 class MultiNodeSpecSpec extends RemotingMultiNodeSpec(MultiNodeSpecMultiJvmSpec) {
-
-  import MultiNodeSpecMultiJvmSpec._
 
   def initialParticipants = 4
 

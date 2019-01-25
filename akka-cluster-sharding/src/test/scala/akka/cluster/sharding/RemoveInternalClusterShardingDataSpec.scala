@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2015-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2015-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.cluster.sharding
 
 import java.io.File
@@ -29,6 +30,7 @@ object RemoveInternalClusterShardingDataSpec {
     akka.loglevel = INFO
     akka.actor.provider = "cluster"
     akka.remote.netty.tcp.port = 0
+    akka.remote.artery.canonical.port = 0
     akka.persistence.journal.plugin = "akka.persistence.journal.leveldb"
     akka.persistence.journal.leveldb {
       native = off
@@ -37,6 +39,8 @@ object RemoveInternalClusterShardingDataSpec {
     akka.persistence.snapshot-store.plugin = "akka.persistence.snapshot-store.local"
     akka.persistence.snapshot-store.local.dir = "target/snapshots-RemoveInternalClusterShardingDataSpec"
     akka.cluster.sharding.snapshot-after = 5
+    akka.cluster.sharding.state-store-mode = persistence
+    akka.cluster.sharding.keep-nr-of-batches = 0
     """
 
   val extractEntityId: ShardRegion.ExtractEntityId = {
@@ -95,11 +99,11 @@ class RemoveInternalClusterShardingDataSpec extends AkkaSpec(RemoveInternalClust
     "akka.persistence.journal.leveldb.dir",
     "akka.persistence.snapshot-store.local.dir").map(s ⇒ new File(system.settings.config.getString(s)))
 
-  override protected def atStartup() {
+  override protected def atStartup(): Unit = {
     storageLocations.foreach(dir ⇒ if (dir.exists) FileUtils.deleteDirectory(dir))
   }
 
-  override protected def afterTermination() {
+  override protected def afterTermination(): Unit = {
     storageLocations.foreach(dir ⇒ if (dir.exists) FileUtils.deleteDirectory(dir))
   }
 
@@ -120,8 +124,8 @@ class RemoveInternalClusterShardingDataSpec extends AkkaSpec(RemoveInternalClust
     "setup sharding" in {
       Cluster(system).join(Cluster(system).selfAddress)
       val settings = ClusterShardingSettings(system)
-      ClusterSharding(system).start("type1", Props[EchoActor], settings, extractEntityId, extractShardId)
-      ClusterSharding(system).start("type2", Props[EchoActor], settings, extractEntityId, extractShardId)
+      ClusterSharding(system).start("type1", Props[EchoActor](), settings, extractEntityId, extractShardId)
+      ClusterSharding(system).start("type2", Props[EchoActor](), settings, extractEntityId, extractShardId)
     }
 
     "work when no data" in within(10.seconds) {
@@ -130,7 +134,7 @@ class RemoveInternalClusterShardingDataSpec extends AkkaSpec(RemoveInternalClust
       val rm = system.actorOf(RemoveInternalClusterShardingData.RemoveOnePersistenceId.props(
         journalPluginId = "", persistenceId("type1"), testActor))
       watch(rm)
-      expectMsg(Result(Success(Removals(false, false))))
+      expectMsg(Result(Success(Removals(events = false, snapshots = false))))
       expectTerminated(rm)
     }
 
@@ -144,7 +148,7 @@ class RemoveInternalClusterShardingDataSpec extends AkkaSpec(RemoveInternalClust
       val rm = system.actorOf(RemoveInternalClusterShardingData.RemoveOnePersistenceId.props(
         journalPluginId = "", persistenceId("type1"), testActor))
       watch(rm)
-      expectMsg(Result(Success(Removals(true, false))))
+      expectMsg(Result(Success(Removals(events = true, snapshots = false))))
       expectTerminated(rm)
       hasSnapshots("type1") should ===(false)
       hasEvents("type1") should ===(false)
@@ -163,7 +167,7 @@ class RemoveInternalClusterShardingDataSpec extends AkkaSpec(RemoveInternalClust
       val rm = system.actorOf(RemoveInternalClusterShardingData.RemoveOnePersistenceId.props(
         journalPluginId = "", persistenceId("type2"), testActor))
       watch(rm)
-      expectMsg(Result(Success(Removals(true, true))))
+      expectMsg(Result(Success(Removals(events = true, snapshots = true))))
       expectTerminated(rm)
       hasSnapshots("type2") should ===(false)
       hasEvents("type2") should ===(false)
@@ -177,7 +181,7 @@ class RemoveInternalClusterShardingDataSpec extends AkkaSpec(RemoveInternalClust
       Cluster(system).join(Cluster(system).selfAddress)
       val settings = ClusterShardingSettings(system)
       typeNames.foreach { typeName ⇒
-        ClusterSharding(system).start(typeName, Props[EchoActor], settings, extractEntityId, extractShardId)
+        ClusterSharding(system).start(typeName, Props[EchoActor](), settings, extractEntityId, extractShardId)
       }
     }
 

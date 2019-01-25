@@ -1,20 +1,27 @@
-/**
- * Copyright (C) 2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2016-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.scaladsl
 
 import java.io._
+import java.nio.charset.StandardCharsets
+import java.nio.file.Files
+import java.util.concurrent.atomic.AtomicInteger
 
 import akka.actor.ActorSystem
 import akka.stream.ActorAttributes._
 import akka.stream.Supervision._
-import akka.stream.{ ActorMaterializer, _ }
 import akka.stream.impl.StreamSupervisor.Children
-import akka.stream.impl.{ ActorMaterializerImpl, StreamSupervisor }
-import akka.stream.testkit.{ StreamSpec, TestSubscriber }
+import akka.stream.impl.{ PhasedFusingActorMaterializer, StreamSupervisor }
 import akka.stream.testkit.Utils._
+import akka.stream.testkit.scaladsl.StreamTestKit._
 import akka.stream.testkit.scaladsl.TestSink
+import akka.stream.testkit.{ StreamSpec, TestSubscriber }
+import akka.stream.{ ActorMaterializer, _ }
+import akka.testkit.EventFilter
 import akka.util.ByteString
+import com.google.common.jimfs.{ Configuration, Jimfs }
 
 import scala.concurrent.duration._
 
@@ -23,7 +30,9 @@ class UnfoldResourceSourceSpec extends StreamSpec(UnboundedMailboxConfig) {
   val settings = ActorMaterializerSettings(system).withDispatcher("akka.actor.default-dispatcher")
   implicit val materializer = ActorMaterializer(settings)
 
-  val manyLines = {
+  private val fs = Jimfs.newFileSystem("UnfoldResourceSourceSpec", Configuration.unix())
+
+  private val manyLines = {
     ("a" * 100 + "\n") * 10 +
       ("b" * 100 + "\n") * 10 +
       ("c" * 100 + "\n") * 10 +
@@ -31,18 +40,18 @@ class UnfoldResourceSourceSpec extends StreamSpec(UnboundedMailboxConfig) {
       ("e" * 100 + "\n") * 10 +
       ("f" * 100 + "\n") * 10
   }
-  val manyLinesArray = manyLines.split("\n")
+  private val manyLinesArray = manyLines.split("\n")
 
-  val manyLinesFile = {
-    val f = File.createTempFile("blocking-source-spec", ".tmp")
-    new FileWriter(f).append(manyLines).close()
-    f
+  private val manyLinesPath = {
+    val file = Files.createFile(fs.getPath("/test.dat"))
+    Files.write(file, manyLines.getBytes(StandardCharsets.UTF_8))
   }
+  private def newBufferedReader() = Files.newBufferedReader(manyLinesPath, StandardCharsets.UTF_8)
 
   "Unfold Resource Source" must {
     "read contents from a file" in assertAllStagesStopped {
       val p = Source.unfoldResource[String, BufferedReader](
-        () ⇒ new BufferedReader(new FileReader(manyLinesFile)),
+        () ⇒ newBufferedReader(),
         reader ⇒ Option(reader.readLine()),
         reader ⇒ reader.close())
         .runWith(Sink.asPublisher(false))
@@ -69,7 +78,7 @@ class UnfoldResourceSourceSpec extends StreamSpec(UnboundedMailboxConfig) {
 
     "continue when Strategy is Resume and exception happened" in assertAllStagesStopped {
       val p = Source.unfoldResource[String, BufferedReader](
-        () ⇒ new BufferedReader(new FileReader(manyLinesFile)),
+        () ⇒ newBufferedReader(),
         reader ⇒ {
           val s = reader.readLine()
           if (s != null && s.contains("b")) throw TE("") else Option(s)
@@ -91,7 +100,7 @@ class UnfoldResourceSourceSpec extends StreamSpec(UnboundedMailboxConfig) {
 
     "close and open stream again when Strategy is Restart" in assertAllStagesStopped {
       val p = Source.unfoldResource[String, BufferedReader](
-        () ⇒ new BufferedReader(new FileReader(manyLinesFile)),
+        () ⇒ newBufferedReader(),
         reader ⇒ {
           val s = reader.readLine()
           if (s != null && s.contains("b")) throw TE("") else Option(s)
@@ -112,9 +121,9 @@ class UnfoldResourceSourceSpec extends StreamSpec(UnboundedMailboxConfig) {
 
     "work with ByteString as well" in assertAllStagesStopped {
       val chunkSize = 50
-      val buffer = Array.ofDim[Char](chunkSize)
+      val buffer = new Array[Char](chunkSize)
       val p = Source.unfoldResource[ByteString, Reader](
-        () ⇒ new BufferedReader(new FileReader(manyLinesFile)),
+        () ⇒ newBufferedReader(),
         reader ⇒ {
           val s = reader.read(buffer)
           if (s > 0) Some(ByteString(buffer.mkString("")).take(s)) else None
@@ -146,45 +155,82 @@ class UnfoldResourceSourceSpec extends StreamSpec(UnboundedMailboxConfig) {
       val materializer = ActorMaterializer()(sys)
       try {
         val p = Source.unfoldResource[String, BufferedReader](
-          () ⇒ new BufferedReader(new FileReader(manyLinesFile)),
+          () ⇒ newBufferedReader(),
           reader ⇒ Option(reader.readLine()),
           reader ⇒ reader.close()).runWith(TestSink.probe)(materializer)
 
-        materializer.asInstanceOf[ActorMaterializerImpl].supervisor.tell(StreamSupervisor.GetChildren, testActor)
+        materializer.asInstanceOf[PhasedFusingActorMaterializer].supervisor.tell(StreamSupervisor.GetChildren, testActor)
         val ref = expectMsgType[Children].children.find(_.path.toString contains "unfoldResourceSource").get
         try assertDispatcher(ref, "akka.stream.default-blocking-io-dispatcher") finally p.cancel()
       } finally shutdown(sys)
     }
 
     "fail when create throws exception" in assertAllStagesStopped {
-      val p = Source.unfoldResource[String, BufferedReader](
-        () ⇒ throw TE(""),
-        reader ⇒ Option(reader.readLine()),
-        reader ⇒ reader.close())
-        .runWith(Sink.asPublisher(false))
-      val c = TestSubscriber.manualProbe[String]()
-      p.subscribe(c)
+      EventFilter[TE](occurrences = 1).intercept {
+        val p = Source.unfoldResource[String, BufferedReader](
+          () ⇒ throw TE(""),
+          reader ⇒ Option(reader.readLine()),
+          reader ⇒ reader.close())
+          .runWith(Sink.asPublisher(false))
+        val c = TestSubscriber.manualProbe[String]()
+        p.subscribe(c)
 
-      c.expectSubscription()
-      c.expectError(TE(""))
+        c.expectSubscription()
+        c.expectError(TE(""))
+      }
     }
 
     "fail when close throws exception" in assertAllStagesStopped {
-      val p = Source.unfoldResource[String, BufferedReader](
-        () ⇒ new BufferedReader(new FileReader(manyLinesFile)),
-        reader ⇒ Option(reader.readLine()),
-        reader ⇒ throw TE(""))
-        .runWith(Sink.asPublisher(false))
-      val c = TestSubscriber.manualProbe[String]()
-      p.subscribe(c)
+      val out = TestSubscriber.probe[String]()
 
-      val sub = c.expectSubscription()
-      sub.request(61)
-      c.expectNextN(60)
-      c.expectError(TE(""))
+      EventFilter[TE](occurrences = 1).intercept {
+        Source.unfoldResource[String, Iterator[String]](
+          () ⇒ Iterator("a"),
+          it ⇒ if (it.hasNext) Some(it.next()) else None,
+          _ ⇒ throw TE(""))
+          .runWith(Sink.fromSubscriber(out))
+
+        out.request(61)
+        out.expectNext("a")
+        out.expectError(TE(""))
+      }
     }
+
+    // issue #24924
+    "not close the resource twice when read fails" in {
+      val closedCounter = new AtomicInteger(0)
+      val probe = Source.unfoldResource[Int, Int](
+        () ⇒ 23, // the best resource there is
+        _ ⇒ throw TE("failing read"),
+        _ ⇒ closedCounter.incrementAndGet()
+      ).runWith(TestSink.probe[Int])
+
+      probe.request(1)
+      probe.expectError(TE("failing read"))
+      closedCounter.get() should ===(1)
+    }
+
+    // issue #24924
+    "not close the resource twice when read fails and then close fails" in {
+      val closedCounter = new AtomicInteger(0)
+      val probe = Source.unfoldResource[Int, Int](
+        () ⇒ 23, // the best resource there is
+        _ ⇒ throw TE("failing read"),
+        { _ ⇒
+          closedCounter.incrementAndGet()
+          if (closedCounter.get == 1) throw TE("boom")
+        }
+      ).runWith(TestSink.probe[Int])
+
+      EventFilter[TE](occurrences = 1).intercept {
+        probe.request(1)
+        probe.expectError(TE("boom"))
+      }
+      closedCounter.get() should ===(1)
+    }
+
   }
   override def afterTermination(): Unit = {
-    manyLinesFile.delete()
+    fs.close()
   }
 }

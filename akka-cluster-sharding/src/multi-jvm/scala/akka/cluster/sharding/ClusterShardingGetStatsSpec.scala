@@ -1,14 +1,14 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.cluster.sharding
 
 import akka.actor._
-import akka.cluster.{ MemberStatus, Cluster }
-import akka.cluster.ClusterEvent.CurrentClusterState
+import akka.cluster.{ Cluster, MemberStatus, MultiNodeClusterSpec }
 import akka.remote.testconductor.RoleName
 import akka.remote.testkit.{ MultiNodeConfig, MultiNodeSpec, STMultiNodeSpec }
-import akka.testkit.{ TestProbe, TestDuration }
+import akka.testkit.{ TestDuration, TestProbe }
 import com.typesafe.config.ConfigFactory
 
 import scala.concurrent.duration._
@@ -50,15 +50,18 @@ object ClusterShardingGetStatsSpecConfig extends MultiNodeConfig {
     akka.actor.provider = "cluster"
     akka.remote.log-remote-lifecycle-events = off
     akka.log-dead-letters-during-shutdown = off
-    akka.cluster.metrics.enabled = off
     akka.cluster.auto-down-unreachable-after = 0s
     akka.cluster.sharding {
       state-store-mode = "ddata"
       updating-state-timeout = 2s
       waiting-for-state-timeout = 2s
     }
+    akka.cluster.sharding.distributed-data.durable.lmdb {
+      dir = target/ClusterShardingGetStatsSpec/sharding-ddata
+      map-size = 10 MiB
+    }
     akka.actor.warn-about-java-serializer-usage=false
-    """))
+    """).withFallback(MultiNodeClusterSpec.clusterConfig))
 
   nodeConfig(first, second, third)(ConfigFactory.parseString(
     """akka.cluster.roles=["shard"]"""))

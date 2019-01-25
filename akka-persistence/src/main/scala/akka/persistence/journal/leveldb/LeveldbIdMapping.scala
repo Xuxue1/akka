@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.persistence.journal.leveldb
@@ -69,7 +69,7 @@ private[persistence] trait LeveldbIdMapping extends Actor { this: LeveldbStore â
 
   protected def newPersistenceIdAdded(id: String): Unit = ()
 
-  override def preStart() {
+  override def preStart(): Unit = {
     idMap = readIdMap()
     super.preStart()
   }

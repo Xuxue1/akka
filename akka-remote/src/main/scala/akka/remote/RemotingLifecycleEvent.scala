@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.remote
 
 import akka.event.Logging.LogLevel
@@ -84,7 +85,7 @@ final case class RemotingErrorEvent(cause: Throwable) extends RemotingLifecycleE
 // For binary compatibility
 object QuarantinedEvent extends AbstractFunction2[Address, Int, QuarantinedEvent] {
 
-  @deprecated("Use long uid apply")
+  @deprecated("Use long uid apply", "2.4.x")
   def apply(address: Address, uid: Int) = new QuarantinedEvent(address, uid)
 }
 
@@ -94,19 +95,30 @@ final case class QuarantinedEvent(address: Address, longUid: Long) extends Remot
   override def logLevel: Logging.LogLevel = Logging.WarningLevel
   override val toString: String =
     s"Association to [$address] having UID [$longUid] is irrecoverably failed. UID is now quarantined and all " +
-      "messages to this UID will be delivered to dead letters. Remote actorsystem must be restarted to recover " +
+      "messages to this UID will be delivered to dead letters. Remote ActorSystem must be restarted to recover " +
       "from this situation."
 
   // For binary compatibility
 
-  @deprecated("Use long uid constructor")
+  @deprecated("Use long uid constructor", "2.4.x")
   def this(address: Address, uid: Int) = this(address, uid.toLong)
 
-  @deprecated("Use long uid")
+  @deprecated("Use long uid", "2.4.x")
   def uid: Int = longUid.toInt
 
-  @deprecated("Use long uid copy method")
+  @deprecated("Use long uid copy method", "2.4.x")
   def copy(address: Address = address, uid: Int = uid) = new QuarantinedEvent(address, uid)
+}
+
+/**
+ * The `uniqueAddress` was quarantined but it was due to normal shutdown or cluster leaving/exiting.
+ */
+@SerialVersionUID(1L)
+final case class GracefulShutdownQuarantinedEvent(uniqueAddress: UniqueAddress, reason: String) extends RemotingLifecycleEvent {
+  override def logLevel: Logging.LogLevel = Logging.InfoLevel
+  override val toString: String =
+    s"Association to [${uniqueAddress.address}] having UID [${uniqueAddress.uid}] has been stopped. All " +
+      s"messages to this UID will be delivered to dead letters. Reason: $reason "
 }
 
 @SerialVersionUID(1L)

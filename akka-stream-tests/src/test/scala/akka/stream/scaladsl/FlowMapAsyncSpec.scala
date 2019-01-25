@@ -1,29 +1,27 @@
-/**
- * Copyright (C) 2014-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2014-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.scaladsl
 
-import scala.concurrent.Await
-import scala.concurrent.Future
-import scala.concurrent.duration._
-import java.util.concurrent.ThreadLocalRandom
+import java.util.concurrent.{ LinkedBlockingQueue, ThreadLocalRandom }
+import java.util.concurrent.atomic.AtomicInteger
 
-import scala.util.control.NoStackTrace
-import akka.stream.ActorMaterializer
-import akka.stream.testkit._
-import akka.stream.testkit.Utils._
-import akka.testkit.TestLatch
-import akka.testkit.TestProbe
 import akka.stream.ActorAttributes.supervisionStrategy
+import akka.stream.{ ActorAttributes, ActorMaterializer, Supervision }
 import akka.stream.Supervision.resumingDecider
 import akka.stream.impl.ReactiveStreamsCompliance
+import akka.stream.testkit.Utils._
+import akka.stream.testkit.scaladsl.StreamTestKit._
+import akka.stream.testkit._
+import akka.stream.testkit.scaladsl.TestSink
+import akka.testkit.{ TestLatch, TestProbe }
+import org.scalatest.concurrent.PatienceConfiguration.Timeout
 
 import scala.annotation.tailrec
-import scala.concurrent.Promise
-import java.util.concurrent.atomic.AtomicInteger
-import java.util.concurrent.LinkedBlockingQueue
-
-import org.scalatest.concurrent.PatienceConfiguration.Timeout
+import scala.concurrent.{ Await, Future, Promise }
+import scala.concurrent.duration._
+import scala.util.control.NoStackTrace
 
 class FlowMapAsyncSpec extends StreamSpec {
 
@@ -84,6 +82,23 @@ class FlowMapAsyncSpec extends StreamSpec {
       c.expectNoMsg(200.millis)
     }
 
+    "signal future already failed" in assertAllStagesStopped {
+      val latch = TestLatch(1)
+      val c = TestSubscriber.manualProbe[Int]()
+      implicit val ec = system.dispatcher
+      val p = Source(1 to 5).mapAsync(4)(n ⇒
+        if (n == 3) Future.failed[Int](new TE("err1"))
+        else Future {
+          Await.ready(latch, 10.seconds)
+          n
+        }
+      ).to(Sink.fromSubscriber(c)).run()
+      val sub = c.expectSubscription()
+      sub.request(10)
+      c.expectError().getMessage should be("err1")
+      latch.countDown()
+    }
+
     "signal future failure" in assertAllStagesStopped {
       val latch = TestLatch(1)
       val c = TestSubscriber.manualProbe[Int]()
@@ -122,6 +137,82 @@ class FlowMapAsyncSpec extends StreamSpec {
       latch.countDown()
     }
 
+    "a failure mid-stream MUST cause a failure ASAP (stopping strategy)" in assertAllStagesStopped {
+      import system.dispatcher
+      val pa = Promise[String]()
+      val pb = Promise[String]()
+      val pc = Promise[String]()
+      val pd = Promise[String]()
+      val pe = Promise[String]()
+      val pf = Promise[String]()
+
+      val input = pa :: pb :: pc :: pd :: pe :: pf :: Nil
+
+      val probe = Source.fromIterator(() ⇒ input.iterator)
+        .mapAsync(5)(p ⇒ p.future.map(_.toUpperCase))
+        .runWith(TestSink.probe)
+
+      import TestSubscriber._
+      var gotErrorAlready = false
+      val elementOrErrorOk: PartialFunction[SubscriberEvent, Unit] = {
+        case OnNext("A") ⇒ () // is fine
+        case OnNext("B") ⇒ () // is fine
+        case OnError(ex) if ex.getMessage == "Boom at C" && !gotErrorAlready ⇒
+          gotErrorAlready = true // fine, error can over-take elements
+      }
+      probe.request(100)
+
+      val boom = new Exception("Boom at C")
+
+      // placing the future completion signals here is important
+      // the ordering is meant to expose a race between the failure at C and subsequent elements
+      pa.success("a")
+      pb.success("b")
+      pc.failure(boom)
+      pd.success("d")
+      pe.success("e")
+      pf.success("f")
+
+      probe.expectNextOrError() match {
+        case Left(ex) ⇒ ex.getMessage should ===("Boom at C") // fine, error can over-take elements
+        case Right("A") ⇒
+          probe.expectNextOrError() match {
+            case Left(ex) ⇒ ex.getMessage should ===("Boom at C") // fine, error can over-take elements
+            case Right("B") ⇒
+              probe.expectNextOrError() match {
+                case Left(ex)       ⇒ ex.getMessage should ===("Boom at C") // fine, error can over-take elements
+                case Right(element) ⇒ fail(s"Got [$element] yet it caused an exception, should not have happened!")
+              }
+          }
+      }
+    }
+
+    "a failure mid-stream must skip element with resume strategy" in assertAllStagesStopped {
+      val pa = Promise[String]()
+      val pb = Promise[String]()
+      val pc = Promise[String]()
+      val pd = Promise[String]()
+      val pe = Promise[String]()
+      val pf = Promise[String]()
+
+      val input = pa :: pb :: pc :: pd :: pe :: pf :: Nil
+
+      val elements = Source.fromIterator(() ⇒ input.iterator)
+        .mapAsync(5)(p ⇒ p.future)
+        .withAttributes(ActorAttributes.supervisionStrategy(Supervision.resumingDecider))
+        .runWith(Sink.seq)
+
+      // the problematic ordering:
+      pa.success("a")
+      pb.success("b")
+      pd.success("d")
+      pe.success("e")
+      pf.success("f")
+      pc.failure(new Exception("Booom!"))
+
+      elements.futureValue should ===(List("a", "b", /* no c */ "d", "e", "f"))
+    }
+
     "signal error from mapAsync" in assertAllStagesStopped {
       val latch = TestLatch(1)
       val c = TestSubscriber.manualProbe[Int]()
@@ -149,6 +240,22 @@ class FlowMapAsyncSpec extends StreamSpec {
           if (n == 3) throw new RuntimeException("err3") with NoStackTrace
           else n
         })
+        .withAttributes(supervisionStrategy(resumingDecider))
+        .to(Sink.fromSubscriber(c)).run()
+      val sub = c.expectSubscription()
+      sub.request(10)
+      for (n ← List(1, 2, 4, 5)) c.expectNext(n)
+      c.expectComplete()
+    }
+
+    "resume after already failed future" in assertAllStagesStopped {
+      val c = TestSubscriber.manualProbe[Int]()
+      implicit val ec = system.dispatcher
+      val p = Source(1 to 5)
+        .mapAsync(4)(n ⇒
+          if (n == 3) Future.failed(new TE("err3"))
+          else Future.successful(n)
+        )
         .withAttributes(supervisionStrategy(resumingDecider))
         .to(Sink.fromSubscriber(c)).run()
       val sub = c.expectSubscription()
@@ -276,6 +383,66 @@ class FlowMapAsyncSpec extends StreamSpec {
       } finally {
         timer.interrupt()
       }
+    }
+
+    "not invoke the decider twice for the same failed future" in {
+      import system.dispatcher
+      val failCount = new AtomicInteger(0)
+      val result = Source(List(true, false))
+        .mapAsync(1)(elem ⇒
+          Future {
+            if (elem) throw TE("this has gone too far")
+            else elem
+          }
+        ).addAttributes(supervisionStrategy {
+          case TE("this has gone too far") ⇒
+            failCount.incrementAndGet()
+            Supervision.resume
+          case _ ⇒ Supervision.stop
+        })
+        .runWith(Sink.seq)
+
+      result.futureValue should ===(Seq(false))
+      failCount.get() should ===(1)
+    }
+
+    "not invoke the decider twice for the same already failed future" in {
+      val failCount = new AtomicInteger(0)
+      val result = Source(List(true, false))
+        .mapAsync(1)(elem ⇒
+          if (elem) Future.failed(TE("this has gone too far"))
+          else Future.successful(elem)
+        ).addAttributes(supervisionStrategy {
+          case TE("this has gone too far") ⇒
+            failCount.incrementAndGet()
+            Supervision.resume
+          case _ ⇒ Supervision.stop
+        })
+        .runWith(Sink.seq)
+
+      result.futureValue should ===(Seq(false))
+      failCount.get() should ===(1)
+    }
+
+    "not invoke the decider twice for the same failure to produce a future" in {
+      import system.dispatcher
+      val failCount = new AtomicInteger(0)
+      val result = Source(List(true, false))
+        .mapAsync(1)(elem ⇒
+          if (elem) throw TE("this has gone too far")
+          else Future {
+            elem
+          }
+        ).addAttributes(supervisionStrategy {
+          case TE("this has gone too far") ⇒
+            failCount.incrementAndGet()
+            Supervision.resume
+          case _ ⇒ Supervision.stop
+        })
+        .runWith(Sink.seq)
+
+      result.futureValue should ===(Seq(false))
+      failCount.get() should ===(1)
     }
 
   }

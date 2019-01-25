@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.actor
@@ -313,7 +313,7 @@ class ActorRefSpec extends AkkaSpec with DefaultTimeout {
       (intercept[java.lang.IllegalStateException] {
         in.readObject
       }).getMessage should ===("Trying to deserialize a serialized ActorRef without an ActorSystem in scope." +
-        " Use 'akka.serialization.Serialization.currentSystem.withValue(system) { ... }'")
+        " Use 'akka.serialization.JavaSerializer.currentSystem.withValue(system) { ... }'")
     }
 
     "return EmptyLocalActorRef on deserialize if not present in actor hierarchy (and remoting is not enabled)" in {

@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2016-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.remote.serialization
 
 import akka.actor.{ ActorInitializationException, ActorRef, ExtendedActorSystem, InternalActorRef }

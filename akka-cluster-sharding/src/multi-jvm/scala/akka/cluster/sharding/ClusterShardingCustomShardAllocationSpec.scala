@@ -1,17 +1,14 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.cluster.sharding
 
 import scala.collection.immutable
-import java.io.File
-import akka.cluster.sharding.ShardRegion.Passivate
 import scala.concurrent.duration._
-import org.apache.commons.io.FileUtils
 import com.typesafe.config.ConfigFactory
 import akka.actor._
-import akka.cluster.Cluster
-import akka.cluster.ClusterEvent._
+import akka.cluster.{ Cluster, MultiNodeClusterSpec }
 import akka.persistence.Persistence
 import akka.persistence.journal.leveldb.SharedLeveldbJournal
 import akka.persistence.journal.leveldb.SharedLeveldbStore
@@ -19,9 +16,9 @@ import akka.remote.testconductor.RoleName
 import akka.remote.testkit.MultiNodeConfig
 import akka.remote.testkit.MultiNodeSpec
 import akka.remote.testkit.STMultiNodeSpec
-import akka.remote.transport.ThrottlerTransportAdapter.Direction
 import akka.testkit._
 import akka.cluster.sharding.ShardCoordinator.ShardAllocationStrategy
+
 import scala.concurrent.Future
 import akka.util.Timeout
 import akka.pattern.ask
@@ -37,7 +34,7 @@ object ClusterShardingCustomShardAllocationSpec {
     case id: Int ⇒ (id.toString, id)
   }
 
-  val extractShardId: ShardRegion.ExtractShardId = msg ⇒ msg match {
+  val extractShardId: ShardRegion.ExtractShardId = {
     case id: Int ⇒ id.toString
   }
 
@@ -84,7 +81,6 @@ abstract class ClusterShardingCustomShardAllocationSpecConfig(val mode: String) 
   val second = role("second")
 
   commonConfig(ConfigFactory.parseString(s"""
-    akka.loglevel = INFO
     akka.actor.provider = "cluster"
     akka.remote.log-remote-lifecycle-events = off
     akka.persistence.journal.plugin = "akka.persistence.journal.leveldb-shared"
@@ -92,13 +88,15 @@ abstract class ClusterShardingCustomShardAllocationSpecConfig(val mode: String) 
       timeout = 5s
       store {
         native = off
-        dir = "target/journal-ClusterShardingCustomShardAllocationSpec"
+        dir = "target/ClusterShardingCustomShardAllocationSpec/journal"
       }
     }
     akka.persistence.snapshot-store.plugin = "akka.persistence.snapshot-store.local"
-    akka.persistence.snapshot-store.local.dir = "target/snapshots-ClusterShardingCustomShardAllocationSpec"
+    akka.persistence.snapshot-store.local.dir = "target/ClusterShardingCustomShardAllocationSpec/snapshots"
     akka.cluster.sharding.state-store-mode = "$mode"
-    """))
+    akka.cluster.sharding.rebalance-interval = 1 s
+    #akka.cluster.sharding.retry-interval = 5 s
+    """).withFallback(MultiNodeClusterSpec.clusterConfig))
 }
 
 object PersistentClusterShardingCustomShardAllocationSpecConfig extends ClusterShardingCustomShardAllocationSpecConfig("persistence")
@@ -118,23 +116,6 @@ abstract class ClusterShardingCustomShardAllocationSpec(config: ClusterShardingC
   import config._
 
   override def initialParticipants = roles.size
-
-  val storageLocations = List(
-    "akka.persistence.journal.leveldb.dir",
-    "akka.persistence.journal.leveldb-shared.store.dir",
-    "akka.persistence.snapshot-store.local.dir").map(s ⇒ new File(system.settings.config.getString(s)))
-
-  override protected def atStartup() {
-    runOn(first) {
-      storageLocations.foreach(dir ⇒ if (dir.exists) FileUtils.deleteDirectory(dir))
-    }
-  }
-
-  override protected def afterTermination() {
-    runOn(first) {
-      storageLocations.foreach(dir ⇒ if (dir.exists) FileUtils.deleteDirectory(dir))
-    }
-  }
 
   def join(from: RoleName, to: RoleName): Unit = {
     runOn(from) {
@@ -159,26 +140,30 @@ abstract class ClusterShardingCustomShardAllocationSpec(config: ClusterShardingC
 
   lazy val allocator = system.actorOf(Props[Allocator], "allocator")
 
+  def isDdataMode: Boolean = mode == ClusterShardingSettings.StateStoreModeDData
+
   s"Cluster sharding ($mode) with custom allocation strategy" must {
 
-    "setup shared journal" in {
-      // start the Persistence extension
-      Persistence(system)
-      runOn(first) {
-        system.actorOf(Props[SharedLeveldbStore], "store")
-      }
-      enterBarrier("peristence-started")
+    if (!isDdataMode) {
+      "setup shared journal" in {
+        // start the Persistence extension
+        Persistence(system)
+        runOn(first) {
+          system.actorOf(Props[SharedLeveldbStore], "store")
+        }
+        enterBarrier("persistence-started")
 
-      runOn(first, second) {
-        system.actorSelection(node(first) / "user" / "store") ! Identify(None)
-        val sharedStore = expectMsgType[ActorIdentity](10.seconds).ref.get
-        SharedLeveldbJournal.setStore(sharedStore, system)
-      }
+        runOn(first, second) {
+          system.actorSelection(node(first) / "user" / "store") ! Identify(None)
+          val sharedStore = expectMsgType[ActorIdentity](10.seconds).ref.get
+          SharedLeveldbJournal.setStore(sharedStore, system)
+        }
 
-      enterBarrier("after-1")
+        enterBarrier("after-1")
+      }
     }
 
-    "use specified region" in within(10.seconds) {
+    "use specified region" in within(30.seconds) {
       join(first, first)
 
       runOn(first) {

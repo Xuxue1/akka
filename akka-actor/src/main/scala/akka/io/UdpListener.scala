@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.io
 
 import java.net.InetSocketAddress
@@ -11,7 +12,7 @@ import scala.annotation.tailrec
 import scala.util.control.NonFatal
 import akka.actor.{ Actor, ActorLogging, ActorRef }
 import akka.dispatch.{ RequiresMessageQueue, UnboundedMessageQueueSemantics }
-import akka.util.{ ByteString, Helpers }
+import akka.util.ByteString
 import akka.io.Inet.DatagramChannelCreator
 import akka.io.SelectionHandler._
 import akka.io.Udp._
@@ -74,16 +75,19 @@ private[io] class UdpListener(
 
     case Unbind ⇒
       log.debug("Unbinding endpoint [{}]", bind.localAddress)
-      try {
-        channel.close()
-        if (Helpers.isWindows) registration.enableInterest(OP_READ)
-        sender() ! Unbound
-        log.debug("Unbound endpoint [{}], stopping listener", bind.localAddress)
-      } finally context.stop(self)
+      registration.cancelAndClose(() ⇒ self ! Unbound)
+      context.become(unregistering(sender()))
+  }
+
+  def unregistering(requester: ActorRef): Receive = {
+    case Unbound ⇒
+      log.debug("Unbound endpoint [{}], stopping listener", bind.localAddress)
+      requester ! Unbound
+      context.stop(self)
   }
 
   def doReceive(registration: ChannelRegistration, handler: ActorRef): Unit = {
-    @tailrec def innerReceive(readsLeft: Int, buffer: ByteBuffer) {
+    @tailrec def innerReceive(readsLeft: Int, buffer: ByteBuffer): Unit = {
       buffer.clear()
       buffer.limit(DirectBufferSize)
 

@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.scaladsl
 
 import akka.actor.ActorRef
@@ -14,6 +15,7 @@ import scala.concurrent.duration._
 
 import akka.stream.testkit._
 import akka.stream.testkit.Utils._
+import akka.stream.testkit.scaladsl.StreamTestKit._
 
 object GraphStageTimersSpec {
   case object TestSingleTimer

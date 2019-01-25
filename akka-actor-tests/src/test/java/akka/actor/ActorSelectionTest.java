@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.actor;
@@ -9,7 +9,7 @@ import akka.testkit.AkkaSpec;
 import org.junit.ClassRule;
 import org.junit.Test;
 import org.scalatest.junit.JUnitSuite;
-import scala.concurrent.duration.FiniteDuration;
+import java.time.Duration;
 
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
@@ -19,18 +19,18 @@ import static org.junit.Assert.assertEquals;
 public class ActorSelectionTest extends JUnitSuite {
 
   @ClassRule
-  public static AkkaJUnitActorSystemResource actorSystemResource = new AkkaJUnitActorSystemResource("ActorSelectionTest",
-    AkkaSpec.testConf());
+  public static AkkaJUnitActorSystemResource actorSystemResource =
+      new AkkaJUnitActorSystemResource("ActorSelectionTest", AkkaSpec.testConf());
 
   private final ActorSystem system = actorSystemResource.getSystem();
 
   @Test
-  public void testResolveOneCS() throws Exception {
+  public void testResolveOne() throws Exception {
     ActorRef actorRef = system.actorOf(Props.create(JavaAPITestActor.class), "ref1");
     ActorSelection selection = system.actorSelection("user/ref1");
-    FiniteDuration timeout = new FiniteDuration(10, TimeUnit.MILLISECONDS);
+    Duration timeout = Duration.ofMillis(10);
 
-    CompletionStage<ActorRef> cs = selection.resolveOneCS(timeout);
+    CompletionStage<ActorRef> cs = selection.resolveOne(timeout);
 
     ActorRef resolvedRef = cs.toCompletableFuture().get(3, TimeUnit.SECONDS);
     assertEquals(actorRef, resolvedRef);

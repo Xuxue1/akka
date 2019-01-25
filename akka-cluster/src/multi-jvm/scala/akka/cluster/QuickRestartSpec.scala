@@ -1,19 +1,18 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.cluster
 
 import java.util.concurrent.ThreadLocalRandom
 
 import akka.actor.{ ActorSystem, Address }
-import akka.remote.RARP
 import akka.remote.testkit.{ MultiNodeConfig, MultiNodeSpec }
 import akka.testkit._
 import com.typesafe.config.ConfigFactory
 
 import scala.collection.immutable
 import scala.concurrent.duration._
-import scala.language.postfixOps
 
 // This test was a reproducer for issue #20639
 object QuickRestartMultiJvmSpec extends MultiNodeConfig {
@@ -24,6 +23,7 @@ object QuickRestartMultiJvmSpec extends MultiNodeConfig {
   commonConfig(debugConfig(on = false).
     withFallback(ConfigFactory.parseString("""
       akka.cluster.auto-down-unreachable-after = off
+      akka.cluster.allow-weakly-up-members = off
       """)).
     withFallback(MultiNodeClusterSpec.clusterConfig))
 
@@ -69,17 +69,11 @@ abstract class QuickRestartSpec
                 system.name,
                 // use the same port
                 ConfigFactory.parseString(
-                  if (RARP(system).provider.remoteSettings.Artery.Enabled)
-                    s"""
+                  s"""
                        akka.cluster.roles = [round-$n]
+                       akka.remote.netty.tcp.port = ${Cluster(restartingSystem).selfAddress.port.get}
                        akka.remote.artery.canonical.port = ${Cluster(restartingSystem).selfAddress.port.get}
-                     """
-                  else
-                    s"""
-                      akka.cluster.roles = [round-$n]
-                      akka.remote.netty.tcp.port = ${Cluster(restartingSystem).selfAddress.port.get}
-                    """
-                ).withFallback(system.settings.config))
+                     """).withFallback(system.settings.config))
           log.info("Restarting node has address: {}", Cluster(restartingSystem).selfUniqueAddress)
           Cluster(restartingSystem).joinSeedNodes(seedNodes)
           within(20.seconds) {
@@ -96,7 +90,7 @@ abstract class QuickRestartSpec
             Cluster(system).state.members.size should ===(totalNumberOfNodes)
             Cluster(system).state.members.map(_.status == MemberStatus.Up)
             // use the role to test that it is the new incarnation that joined, sneaky
-            Cluster(system).state.members.flatMap(_.roles) should ===(Set(s"round-$n"))
+            Cluster(system).state.members.flatMap(_.roles) should ===(Set(s"round-$n", ClusterSettings.DcRolePrefix + "default"))
           }
         }
         enterBarrier("members-up-" + n)

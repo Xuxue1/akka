@@ -1,28 +1,30 @@
-/**
- * Copyright (C) 2015-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2015-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.impl
 
 import akka.stream.actor.ActorSubscriber
 import akka.actor.ActorRef
 import akka.stream.actor.ActorSubscriberMessage
-import akka.actor.Status
 import akka.stream.actor.WatermarkRequestStrategy
 import akka.actor.Props
 import akka.actor.Terminated
+import akka.annotation.InternalApi
 
 /**
  * INTERNAL API
  */
-private[akka] object ActorRefSinkActor {
-  def props(ref: ActorRef, highWatermark: Int, onCompleteMessage: Any): Props =
-    Props(new ActorRefSinkActor(ref, highWatermark, onCompleteMessage))
+@InternalApi private[akka] object ActorRefSinkActor {
+  def props(ref: ActorRef, highWatermark: Int, onCompleteMessage: Any, onFailureMessage: Throwable ⇒ Any): Props =
+    Props(new ActorRefSinkActor(ref, highWatermark, onCompleteMessage, onFailureMessage))
 }
 
 /**
  * INTERNAL API
  */
-private[akka] class ActorRefSinkActor(ref: ActorRef, highWatermark: Int, onCompleteMessage: Any) extends ActorSubscriber {
+@InternalApi private[akka] class ActorRefSinkActor(ref: ActorRef, highWatermark: Int, onCompleteMessage: Any, onFailureMessage: Throwable ⇒ Any)
+  extends ActorSubscriber {
   import ActorSubscriberMessage._
 
   override val requestStrategy = WatermarkRequestStrategy(highWatermark)
@@ -31,12 +33,12 @@ private[akka] class ActorRefSinkActor(ref: ActorRef, highWatermark: Int, onCompl
 
   def receive = {
     case OnNext(elem) ⇒
-      ref ! elem
+      ref.tell(elem, ActorRef.noSender)
     case OnError(cause) ⇒
-      ref ! Status.Failure(cause)
+      ref.tell(onFailureMessage(cause), ActorRef.noSender)
       context.stop(self)
     case OnComplete ⇒
-      ref ! onCompleteMessage
+      ref.tell(onCompleteMessage, ActorRef.noSender)
       context.stop(self)
     case Terminated(`ref`) ⇒
       context.stop(self) // will cancel upstream

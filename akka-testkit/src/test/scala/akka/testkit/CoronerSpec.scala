@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.testkit
 
 import java.io._
@@ -70,7 +71,7 @@ class CoronerSpec extends WordSpec with Matchers {
         val t = new Thread(new Runnable {
           def run = try recursiveLock(initialLocks) catch { case _: InterruptedException ⇒ () }
 
-          def recursiveLock(locks: List[ReentrantLock]) {
+          def recursiveLock(locks: List[ReentrantLock]): Unit = {
             locks match {
               case Nil ⇒ ()
               case lock :: rest ⇒ {

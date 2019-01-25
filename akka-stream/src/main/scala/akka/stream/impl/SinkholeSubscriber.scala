@@ -1,9 +1,11 @@
-/**
- * Copyright (C) 2014-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2014-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.impl
 
 import akka.Done
+import akka.annotation.InternalApi
 
 import scala.concurrent.Promise
 import org.reactivestreams.{ Subscriber, Subscription }
@@ -11,8 +13,7 @@ import org.reactivestreams.{ Subscriber, Subscription }
 /**
  * INTERNAL API
  */
-
-private[akka] final class SinkholeSubscriber[T](whenComplete: Promise[Done]) extends Subscriber[T] {
+@InternalApi private[akka] final class SinkholeSubscriber[T](whenComplete: Promise[Done]) extends Subscriber[T] {
   private[this] var running: Boolean = false
 
   override def onSubscribe(sub: Subscription): Unit = {

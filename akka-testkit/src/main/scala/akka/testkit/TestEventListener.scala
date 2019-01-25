@@ -1,9 +1,9 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.testkit
 
-import language.existentials
 import scala.util.matching.Regex
 import scala.collection.immutable
 import scala.concurrent.duration.Duration
@@ -16,6 +16,7 @@ import akka.actor.NoSerializationVerificationNeeded
 import akka.japi.Util.immutableSeq
 import java.lang.{ Iterable ⇒ JIterable }
 import akka.util.BoxedType
+import akka.util.ccompat._
 
 /**
  * Implementation helpers of the EventFilter facilities: send `Mute`
@@ -39,7 +40,7 @@ sealed trait TestEvent
  */
 object TestEvent {
   object Mute {
-    def apply(filter: EventFilter, filters: EventFilter*): Mute = new Mute(filter +: filters.to[immutable.Seq])
+    def apply(filter: EventFilter, filters: EventFilter*): Mute = new Mute(filter +: filters.to(immutable.Seq))
   }
   final case class Mute(filters: immutable.Seq[EventFilter]) extends TestEvent with NoSerializationVerificationNeeded {
     /**
@@ -48,7 +49,7 @@ object TestEvent {
     def this(filters: JIterable[EventFilter]) = this(immutableSeq(filters))
   }
   object UnMute {
-    def apply(filter: EventFilter, filters: EventFilter*): UnMute = new UnMute(filter +: filters.to[immutable.Seq])
+    def apply(filter: EventFilter, filters: EventFilter*): UnMute = new UnMute(filter +: filters.to(immutable.Seq))
   }
   final case class UnMute(filters: immutable.Seq[EventFilter]) extends TestEvent with NoSerializationVerificationNeeded {
     /**
@@ -177,8 +178,7 @@ object EventFilter {
       message ne null)(occurrences)
 
   /**
-   * Create a filter for Error events which do not have a cause set (i.e. use
-   * implicitly supplied Logging.Error.NoCause). See apply() for more details.
+   * Create a filter for Error events. See apply() for more details.
    */
   def error(message: String = null, source: String = null, start: String = "", pattern: String = null, occurrences: Int = Int.MaxValue): EventFilter =
     ErrorFilter(Logging.Error.NoCause.getClass, Option(source),
@@ -282,7 +282,7 @@ final case class ErrorFilter(
 
   def matches(event: LogEvent) = {
     event match {
-      case Error(cause, src, _, msg) if throwable isInstance cause ⇒
+      case Error(cause, src, _, msg) if (throwable eq Error.NoCause.getClass) || (throwable isInstance cause) ⇒
         (msg == null && cause.getMessage == null && cause.getStackTrace.length == 0) ||
           doMatch(src, msg) || doMatch(src, cause.getMessage)
       case _ ⇒ false
@@ -508,10 +508,11 @@ class TestEventListener extends Logging.DefaultLogger {
       if (!msg.isInstanceOf[Terminate]) {
         val event = Warning(rcp.path.toString, rcp.getClass, msg)
         if (!filter(event)) {
-          val msgStr =
-            if (msg.isInstanceOf[SystemMessage]) "received dead system message: " + msg
-            else "received dead letter from " + snd + ": " + msg
-          val event2 = Warning(rcp.path.toString, rcp.getClass, msgStr)
+          val msgPrefix =
+            if (msg.isInstanceOf[SystemMessage]) "received dead system message"
+            else if (snd eq context.system.deadLetters) "received dead letter without sender"
+            else "received dead letter from " + snd
+          val event2 = Warning(rcp.path.toString, rcp.getClass, msgPrefix + ": " + msg)
           if (!filter(event2)) print(event2)
         }
       }
@@ -521,11 +522,11 @@ class TestEventListener extends Logging.DefaultLogger {
     case m ⇒ print(Debug(context.system.name, this.getClass, m))
   }
 
-  def filter(event: LogEvent): Boolean = filters exists (f ⇒ try { f(event) } catch { case e: Exception ⇒ false })
+  def filter(event: LogEvent): Boolean = filters exists (f ⇒ try { f(event) } catch { case _: Exception ⇒ false })
 
   def addFilter(filter: EventFilter): Unit = filters ::= filter
 
-  def removeFilter(filter: EventFilter) {
+  def removeFilter(filter: EventFilter): Unit = {
     @scala.annotation.tailrec
     def removeFirst(list: List[EventFilter], zipped: List[EventFilter] = Nil): List[EventFilter] = list match {
       case head :: tail if head == filter ⇒ tail.reverse_:::(zipped)

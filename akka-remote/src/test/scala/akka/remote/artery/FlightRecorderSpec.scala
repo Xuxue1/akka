@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.remote.artery
@@ -19,9 +19,13 @@ class FlightRecorderSpec extends AkkaSpec {
 
   "Flight Recorder" must {
 
-    "properly initialize AFR file when created" in withFlightRecorder { (recorder, reader, channel) ⇒
+    "properly initialize AFR file when created" in withFlightRecorder { (_, reader, channel) ⇒
       channel.force(false)
+
+      // otherwise isAfter assertion below can randomly fail
+      Thread.sleep(1)
       val currentTime = Instant.now()
+
       reader.rereadStructure()
 
       currentTime.isAfter(reader.structure.startTime) should be(true)
@@ -33,19 +37,19 @@ class FlightRecorderSpec extends AkkaSpec {
 
       def checkLogInitialized(log: reader.RollingLog): Unit = {
         log.logs(0).state should ===(Live)
-        log.logs(0).head should ===(0)
+        log.logs(0).head should ===(0L)
         log.logs(0).richEntries.toSeq should ===(Nil)
 
         log.logs(1).state should ===(Empty)
-        log.logs(1).head should ===(0)
+        log.logs(1).head should ===(0L)
         log.logs(1).richEntries.toSeq should ===(Nil)
 
         log.logs(2).state should ===(Empty)
-        log.logs(2).head should ===(0)
+        log.logs(2).head should ===(0L)
         log.logs(2).richEntries.toSeq should ===(Nil)
 
         log.logs(3).state should ===(Empty)
-        log.logs(3).head should ===(0)
+        log.logs(3).head should ===(0L)
         log.logs(3).richEntries.toSeq should ===(Nil)
       }
 
@@ -151,7 +155,7 @@ class FlightRecorderSpec extends AkkaSpec {
 
     "properly truncate low frequency event metadata if necessary" in withFlightRecorder { (recorder, reader, channel) ⇒
       val sink = recorder.createEventSink()
-      val longMetadata = Array.ofDim[Byte](1024)
+      val longMetadata = new Array[Byte](1024)
 
       sink.loFreq(0, longMetadata)
       channel.force(false)
@@ -160,7 +164,7 @@ class FlightRecorderSpec extends AkkaSpec {
       val entries = reader.structure.loFreqLog.logs(0).richEntries.toSeq
 
       entries.size should ===(1)
-      entries.head.metadata should ===(Array.ofDim[Byte](FlightRecorder.LoFreqRecordSize - 32))
+      entries.head.metadata should ===(new Array[Byte](FlightRecorder.LoFreqRecordSize - 32))
 
     }
 
@@ -358,10 +362,10 @@ class FlightRecorderSpec extends AkkaSpec {
       channel.force(false)
       reader.rereadStructure()
 
-      reader.structure.loFreqLog.logs(0).richEntries.size should ===(FlightRecorder.LoFreqWindow)
+      reader.structure.loFreqLog.logs.head.richEntries.size should ===(FlightRecorder.LoFreqWindow)
 
       for (i ← 1 to Threads) {
-        val entries = reader.structure.loFreqLog.logs(0).richEntries.filter(_.code == i).toSeq
+        val entries = reader.structure.loFreqLog.logs.head.richEntries.filter(_.code == i).toSeq
 
         entries.exists(_.dirty) should be(false)
         // Entries are consecutive for any given writer

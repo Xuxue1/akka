@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.remote.testconductor
 
 import language.postfixOps
@@ -551,7 +552,7 @@ class BarrierSpec extends AkkaSpec(BarrierSpec.config) with ImplicitSender {
     expectMsgType[ActorRef]
   }
 
-  private def noMsg(probes: TestProbe*) {
+  private def noMsg(probes: TestProbe*): Unit = {
     expectNoMsg(1 second)
     probes foreach (_.msgAvailable should ===(false))
   }

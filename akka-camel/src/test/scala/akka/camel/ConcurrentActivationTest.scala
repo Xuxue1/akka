@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.camel
 
 import org.scalatest.WordSpec
@@ -61,7 +62,7 @@ class ConcurrentActivationTest extends WordSpec with Matchers with NonSharedCame
         // should be the size of the activated activated producers and consumers
         deactivations.size should ===(2 * number * number)
         def partitionNames(refs: immutable.Seq[ActorRef]) = refs.map(_.path.name).partition(_.startsWith("concurrent-test-echo-consumer"))
-        def assertContainsSameElements(lists: (Seq[_], Seq[_])) {
+        def assertContainsSameElements(lists: (Seq[_], Seq[_])): Unit = {
           val (a, b) = lists
           a.intersect(b).size should ===(a.size)
         }
@@ -133,8 +134,8 @@ class Registrar(val start: Int, val number: Int, activationsPromise: Promise[Lis
       actorRefs.foreach { aref ⇒
         context.stop(aref)
         val result = camel.deactivationFutureFor(aref)
-        result.onFailure {
-          case e ⇒ log.error("deactivationFutureFor {} failed: {}", aref, e.getMessage)
+        result.failed.foreach {
+          e ⇒ log.error("deactivationFutureFor {} failed: {}", aref, e.getMessage)
         }
         deActivations += result
         if (deActivations.size == number * 2) {
@@ -143,12 +144,12 @@ class Registrar(val start: Int, val number: Int, activationsPromise: Promise[Lis
       }
   }
 
-  def add(actor: ⇒ Actor, name: String) {
+  def add(actor: ⇒ Actor, name: String): Unit = {
     val ref = context.actorOf(Props(actor), name)
     actorRefs = actorRefs + ref
     val result = camel.activationFutureFor(ref)
-    result.onFailure {
-      case e ⇒ log.error("activationFutureFor {} failed: {}", ref, e.getMessage)
+    result.failed.foreach {
+      e ⇒ log.error("activationFutureFor {} failed: {}", ref, e.getMessage)
     }
     activations += result
   }

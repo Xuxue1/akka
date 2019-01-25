@@ -1,12 +1,15 @@
-/**
- * Copyright (C) 2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2016-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.scaladsl
 
+import akka.stream.stage.{ GraphStage, GraphStageLogic }
 import akka.stream.testkit.StreamSpec
 import akka.stream.testkit.scaladsl.TestSink
-import akka.stream.{ ActorMaterializer, ActorMaterializerSettings }
+import akka.stream._
 import akka.stream.testkit.Utils._
+import akka.stream.testkit.scaladsl.StreamTestKit._
 
 import scala.util.control.NoStackTrace
 
@@ -117,24 +120,63 @@ class FlowRecoverWithSpec extends StreamSpec {
       Source(1 to 3).map { a ⇒ if (a == 3) throw new IndexOutOfBoundsException() else a }
         .recoverWithRetries(3, {
           case t: Throwable ⇒
-            Source(List(11, 22)).concat(Source.failed(ex))
+            Source(List(11, 22, 33)).map(m ⇒ if (m == 33) throw ex else m)
         }).runWith(TestSink.probe[Int])
-        .request(2)
+        .request(100)
         .expectNextN(List(1, 2))
-        .request(2)
         .expectNextN(List(11, 22))
-        .request(2)
         .expectNextN(List(11, 22))
-        .request(2)
         .expectNextN(List(11, 22))
-        .request(1)
         .expectError(ex)
     }
 
-    "throw IllegalArgumentException if number of retries is less than -1" in assertAllStagesStopped {
-      intercept[IllegalArgumentException] {
-        Flow[Int].recoverWithRetries(-2, { case t: Throwable ⇒ Source.empty[Int] })
+    "not attempt recovering when attempts is zero" in assertAllStagesStopped {
+      Source(1 to 3).map { a ⇒ if (a == 3) throw ex else a }
+        .recoverWithRetries(0, { case t: Throwable ⇒ Source(List(22, 33)) })
+        .runWith(TestSink.probe[Int])
+        .request(100)
+        .expectNextN(List(1, 2))
+        .expectError(ex)
+    }
+
+    "recover infinitely when negative (-1) number of attempts given" in assertAllStagesStopped {
+      val oneThenBoom = Source(1 to 2).map { a ⇒ if (a == 2) throw ex else a }
+
+      oneThenBoom
+        .recoverWithRetries(-1, { case t: Throwable ⇒ oneThenBoom })
+        .runWith(TestSink.probe[Int])
+        .request(5)
+        .expectNextN(List(1, 2, 3, 4, 5).map(_ ⇒ 1))
+        .cancel()
+    }
+
+    "recover infinitely when negative (smaller than -1) number of attempts given" in assertAllStagesStopped {
+      val oneThenBoom = Source(1 to 2).map { a ⇒ if (a == 2) throw ex else a }
+
+      oneThenBoom
+        .recoverWithRetries(-10, { case t: Throwable ⇒ oneThenBoom })
+        .runWith(TestSink.probe[Int])
+        .request(5)
+        .expectNextN(List(1, 2, 3, 4, 5).map(_ ⇒ 1))
+        .cancel()
+    }
+
+    "fail correctly when materialization of recover source fails" in assertAllStagesStopped {
+      val matFail = TE("fail!")
+      object FailingInnerMat extends GraphStage[SourceShape[String]] {
+        val out = Outlet[String]("out")
+        val shape = SourceShape(out)
+        override def createLogic(inheritedAttributes: Attributes): GraphStageLogic = new GraphStageLogic(shape) {
+          throw matFail
+        }
       }
+
+      val result = Source.failed(TE("trigger")).recoverWithRetries(1, {
+        case _: TE ⇒ Source.fromGraph(FailingInnerMat)
+      }).runWith(Sink.ignore)
+
+      result.failed.futureValue should ===(matFail)
+
     }
   }
 }

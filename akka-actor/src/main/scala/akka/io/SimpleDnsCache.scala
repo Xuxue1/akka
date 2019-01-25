@@ -1,21 +1,28 @@
+/*
+ * Copyright (C) 2018-2019 Lightbend Inc. <https://www.lightbend.com>
+ */
+
 package akka.io
 
 import java.util.concurrent.atomic.AtomicReference
+
+import akka.annotation.InternalApi
 import akka.io.Dns.Resolved
+import akka.io.dns.CachePolicy._
 
 import scala.annotation.tailrec
 import scala.collection.immutable
 
-private[io] sealed trait PeriodicCacheCleanup {
+private[io] trait PeriodicCacheCleanup {
   def cleanup(): Unit
 }
 
 class SimpleDnsCache extends Dns with PeriodicCacheCleanup {
-  import akka.io.SimpleDnsCache._
+  import SimpleDnsCache._
 
-  private val cache = new AtomicReference(new Cache(
-    immutable.SortedSet()(ExpiryEntryOrdering),
-    immutable.Map(), clock))
+  private val cache = new AtomicReference(new Cache[String, Dns.Resolved](
+    immutable.SortedSet()(expiryEntryOrdering[String]()),
+    Map(), () ⇒ clock))
 
   private val nanoBase = System.nanoTime()
 
@@ -30,10 +37,10 @@ class SimpleDnsCache extends Dns with PeriodicCacheCleanup {
   }
 
   @tailrec
-  private[io] final def put(r: Resolved, ttlMillis: Long): Unit = {
+  private[io] final def put(r: Resolved, ttl: CachePolicy): Unit = {
     val c = cache.get()
-    if (!cache.compareAndSet(c, c.put(r, ttlMillis)))
-      put(r, ttlMillis)
+    if (!cache.compareAndSet(c, c.put(r.name, r, ttl)))
+      put(r, ttl)
   }
 
   @tailrec
@@ -45,24 +52,33 @@ class SimpleDnsCache extends Dns with PeriodicCacheCleanup {
 }
 
 object SimpleDnsCache {
-  private class Cache(queue: immutable.SortedSet[ExpiryEntry], cache: immutable.Map[String, CacheEntry], clock: () ⇒ Long) {
-    def get(name: String): Option[Resolved] = {
+
+  /**
+   * INTERNAL API
+   */
+  @InternalApi
+  private[io] class Cache[K, V](queue: immutable.SortedSet[ExpiryEntry[K]], cache: immutable.Map[K, CacheEntry[V]], clock: () ⇒ Long) {
+    def get(name: K): Option[V] = {
       for {
         e ← cache.get(name)
         if e.isValid(clock())
       } yield e.answer
     }
 
-    def put(answer: Resolved, ttlMillis: Long): Cache = {
-      val until = clock() + ttlMillis
+    def put(name: K, answer: V, ttl: CachePolicy): Cache[K, V] = {
+      val until = ttl match {
+        case Forever  ⇒ Long.MaxValue
+        case Never    ⇒ clock() - 1
+        case Ttl(ttl) ⇒ clock() + ttl.toMillis
+      }
 
-      new Cache(
-        queue + new ExpiryEntry(answer.name, until),
-        cache + (answer.name → CacheEntry(answer, until)),
+      new Cache[K, V](
+        queue + new ExpiryEntry[K](name, until),
+        cache + (name → CacheEntry(answer, until)),
         clock)
     }
 
-    def cleanup(): Cache = {
+    def cleanup(): Cache[K, V] = {
       val now = clock()
       var q = queue
       var c = cache
@@ -77,17 +93,25 @@ object SimpleDnsCache {
     }
   }
 
-  private case class CacheEntry(answer: Dns.Resolved, until: Long) {
+  private case class CacheEntry[T](answer: T, until: Long) {
     def isValid(clock: Long): Boolean = clock < until
   }
 
-  private class ExpiryEntry(val name: String, val until: Long) extends Ordered[ExpiryEntry] {
+  /**
+   * INTERNAL API
+   */
+  @InternalApi
+  private[io] class ExpiryEntry[K](val name: K, val until: Long) extends Ordered[ExpiryEntry[K]] {
     def isValid(clock: Long): Boolean = clock < until
-    override def compare(that: ExpiryEntry): Int = -until.compareTo(that.until)
+    override def compare(that: ExpiryEntry[K]): Int = -until.compareTo(that.until)
   }
 
-  private object ExpiryEntryOrdering extends Ordering[ExpiryEntry] {
-    override def compare(x: ExpiryEntry, y: ExpiryEntry): Int = {
+  /**
+   * INTERNAL API
+   */
+  @InternalApi
+  private[io] def expiryEntryOrdering[K]() = new Ordering[ExpiryEntry[K]] {
+    override def compare(x: ExpiryEntry[K], y: ExpiryEntry[K]): Int = {
       x.until.compareTo(y.until)
     }
   }

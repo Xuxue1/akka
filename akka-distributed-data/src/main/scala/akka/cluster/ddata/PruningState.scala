@@ -1,45 +1,49 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.cluster.ddata
 
 import akka.actor.Address
 import akka.cluster.Member
 import akka.cluster.UniqueAddress
+import akka.annotation.InternalApi
 
 /**
  * INTERNAL API
  */
-private[akka] object PruningState {
-  sealed trait PruningPhase
-  final case class PruningInitialized(seen: Set[Address]) extends PruningPhase
-  case object PruningPerformed extends PruningPhase
+@InternalApi private[akka] object PruningState {
+  final case class PruningInitialized(owner: UniqueAddress, seen: Set[Address]) extends PruningState {
+    override def addSeen(node: Address): PruningState = {
+      if (seen(node) || owner.address == node) this
+      else copy(seen = seen + node)
+    }
+  }
+  final case class PruningPerformed(obsoleteTime: Long) extends PruningState {
+    def isObsolete(currentTime: Long): Boolean = obsoleteTime <= currentTime
+  }
 }
 
 /**
  * INTERNAL API
  */
-private[akka] final case class PruningState(owner: UniqueAddress, phase: PruningState.PruningPhase) {
+@InternalApi private[akka] sealed trait PruningState {
   import PruningState._
 
   def merge(that: PruningState): PruningState =
-    (this.phase, that.phase) match {
-      case (PruningPerformed, _) ⇒ this
-      case (_, PruningPerformed) ⇒ that
-      case (PruningInitialized(thisSeen), PruningInitialized(thatSeen)) ⇒
-        if (this.owner == that.owner)
-          copy(phase = PruningInitialized(thisSeen union thatSeen))
-        else if (Member.addressOrdering.compare(this.owner.address, that.owner.address) > 0)
+    (this, that) match {
+      case (p1: PruningPerformed, p2: PruningPerformed) ⇒ if (p1.obsoleteTime >= p2.obsoleteTime) this else that
+      case (_: PruningPerformed, _)                     ⇒ this
+      case (_, _: PruningPerformed)                     ⇒ that
+      case (PruningInitialized(thisOwner, thisSeen), PruningInitialized(thatOwner, thatSeen)) ⇒
+        if (thisOwner == thatOwner)
+          PruningInitialized(thisOwner, thisSeen union thatSeen)
+        else if (Member.addressOrdering.compare(thisOwner.address, thatOwner.address) > 0)
           that
         else
           this
     }
 
-  def addSeen(node: Address): PruningState = phase match {
-    case PruningInitialized(seen) ⇒
-      if (seen(node) || owner.address == node) this
-      else copy(phase = PruningInitialized(seen + node))
-    case _ ⇒ this
-  }
+  def addSeen(node: Address): PruningState = this
 }
 

@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2014-2015 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2014-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.cluster.ddata;
 
 option java_package = "akka.cluster.ddata.protobuf.msg";
@@ -68,10 +69,12 @@ message DataEnvelope {
     required UniqueAddress ownerAddress = 2;
     required bool performed = 3;
     repeated Address seen = 4;
+    optional sint64 obsoleteTime = 5;
   } 
   
   required OtherMessage data = 1;
   repeated PruningEntry pruning = 2;
+  optional VersionVector deltaVersions = 3;
 }
 
 message Status {
@@ -95,6 +98,19 @@ message Gossip {
   repeated Entry entries = 2;
 }
 
+message DeltaPropagation {
+  message Entry {
+    required string key = 1;
+    required DataEnvelope envelope = 2;
+    required int64 fromSeqNr = 3;
+    optional int64 toSeqNr = 4; // if not set then same as fromSequenceNr
+  }
+  
+  required UniqueAddress fromNode = 1;
+  repeated Entry entries = 2;
+  optional bool reply = 3; // no reply if not set 
+}
+
 message UniqueAddress {
   required Address address = 1;
   required sfixed32 uid = 2;
@@ -107,6 +123,14 @@ message Address {
   required uint32 port = 2;
 }
 
+message VersionVector {
+  message Entry {
+    required UniqueAddress node = 1;
+    required int64 version = 2;
+  }
+  repeated Entry entries = 1;
+}
+
 message OtherMessage {
   required bytes enclosedMessage = 1;
   required int32 serializerId = 2;
@@ -117,4 +141,7 @@ message StringGSet {
   repeated string elements = 1;
 }
 
-
+message DurableDataEnvelope {
+  required OtherMessage data = 1;
+  repeated DataEnvelope.PruningEntry pruning = 2;
+}

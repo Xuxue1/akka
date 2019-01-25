@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2014-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2014-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.tck
 
 /**
@@ -11,5 +12,7 @@ object Timeouts {
   def publisherShutdownTimeoutMillis: Int = 3000
 
   def defaultTimeoutMillis: Int = 800
+
+  def defaultNoSignalsTimeoutMillis: Int = 200
 
 }

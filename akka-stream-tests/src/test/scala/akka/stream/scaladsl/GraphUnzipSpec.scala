@@ -1,12 +1,13 @@
-/**
- * Copyright (C) 2014-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2014-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.scaladsl
 
 import scala.concurrent.duration._
 import akka.stream.{ ClosedShape, OverflowStrategy, ActorMaterializerSettings, ActorMaterializer }
 import akka.stream.testkit._
-import akka.stream.testkit.Utils._
+import akka.stream.testkit.scaladsl.StreamTestKit._
 
 class GraphUnzipSpec extends StreamSpec {
 
@@ -115,7 +116,7 @@ class GraphUnzipSpec extends StreamSpec {
       c1.expectComplete()
     }
 
-    "not loose elements when pull is followed by cancel before other sink has requested" in {
+    "not lose elements when pull is followed by cancel before other sink has requested" in {
       val c1 = TestSubscriber.manualProbe[Int]()
       val c2 = TestSubscriber.manualProbe[String]()
 

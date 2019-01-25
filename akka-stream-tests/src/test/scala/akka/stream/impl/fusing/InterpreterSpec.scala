@@ -1,17 +1,17 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.impl.fusing
 
-import akka.stream.impl.ConstantFun
 import akka.stream.stage._
 import akka.stream.testkit.StreamSpec
 import akka.testkit.EventFilter
 import akka.stream._
 import akka.stream.impl.fusing.GraphStages.SimpleLinearGraphStage
+import akka.util.ConstantFun
 
 class InterpreterSpec extends StreamSpec with GraphInterpreterSpecKit {
-  import Supervision.stoppingDecider
 
   /*
    * These tests were written for the previous version of the interpreter, the so called OneBoundedInterpreter.
@@ -344,8 +344,8 @@ class InterpreterSpec extends StreamSpec with GraphInterpreterSpecKit {
     }
 
     "work with expand-expand" in new OneBoundedSetup[Int](
-      new Expand(Iterator.from),
-      new Expand(Iterator.from)) {
+      new Expand((x: Int) ⇒ Iterator.from(x)),
+      new Expand((x: Int) ⇒ Iterator.from(x))) {
 
       lastEvents() should be(Set(RequestOne))
 
@@ -553,26 +553,6 @@ class InterpreterSpec extends StreamSpec with GraphInterpreterSpecKit {
 
       upstream.onNextAndComplete(1)
       lastEvents() should be(Set(OnNext(1), OnComplete))
-
-    }
-
-    //#20386
-    @deprecated("Usage of PushPullStage is deprecated, please use GraphStage instead", "2.4.5")
-    class InvalidAbsorbTermination extends PushPullStage[Int, Int] {
-      override def onPull(ctx: Context[Int]): SyncDirective = ctx.pull()
-      override def onPush(elem: Int, ctx: Context[Int]): SyncDirective = ctx.push(elem)
-      override def onDownstreamFinish(ctx: Context[Int]): TerminationDirective = ctx.absorbTermination()
-    }
-
-    // This test must be kept since it tests the compatibility layer, which while is deprecated it is still here.
-    "not allow absorbTermination from onDownstreamFinish()" in new OneBoundedSetup[Int]((new InvalidAbsorbTermination).toGS) {
-      lastEvents() should be(Set.empty)
-
-      EventFilter[UnsupportedOperationException]("It is not allowed to call absorbTermination() from onDownstreamFinish.", occurrences = 1).intercept {
-        downstream.cancel()
-        lastEvents() should be(Set(Cancel))
-      }
-
     }
 
   }
@@ -619,7 +599,7 @@ class InterpreterSpec extends StreamSpec with GraphInterpreterSpecKit {
           push(out, lastElem)
         }
 
-        // note that the default value of lastElem will be always pushed if the upstream closed at the very begining without a pulling
+        // note that the default value of lastElem will be always pushed if the upstream closed at the very beginning without a pulling
         override def onPull(): Unit = {
           if (isClosed(in)) {
             push(out, lastElem)

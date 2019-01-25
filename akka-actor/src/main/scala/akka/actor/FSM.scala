@@ -1,14 +1,18 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.actor
 
 import language.implicitConversions
 import scala.concurrent.duration.Duration
 import scala.collection.mutable
-import akka.routing.{ Deafen, Listen, Listeners }
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.duration._
+
+import akka.routing.{ Deafen, Listen, Listeners }
+import akka.annotation.InternalApi
+import akka.util.{ JavaDurationConverters, unused }
 
 object FSM {
 
@@ -87,18 +91,23 @@ object FSM {
   /**
    * INTERNAL API
    */
-  // FIXME: what about the cancellable?
-  private[akka] final case class Timer(name: String, msg: Any, repeat: Boolean, generation: Int)(context: ActorContext)
+  @InternalApi
+  private[akka] final case class Timer(name: String, msg: Any, repeat: Boolean, generation: Int,
+                                       owner: AnyRef)(context: ActorContext)
     extends NoSerializationVerificationNeeded {
     private var ref: Option[Cancellable] = _
     private val scheduler = context.system.scheduler
     private implicit val executionContext = context.dispatcher
 
-    def schedule(actor: ActorRef, timeout: FiniteDuration): Unit =
+    def schedule(actor: ActorRef, timeout: FiniteDuration): Unit = {
+      val timerMsg = msg match {
+        case m: AutoReceivedMessage ⇒ m
+        case _                      ⇒ this
+      }
       ref = Some(
-        if (repeat) scheduler.schedule(timeout, timeout, actor, this)
-        else scheduler.scheduleOnce(timeout, actor, this))
-
+        if (repeat) scheduler.schedule(timeout, timeout, actor, timerMsg)
+        else scheduler.scheduleOnce(timeout, actor, timerMsg))
+    }
     def cancel(): Unit =
       if (ref.isDefined) {
         ref.get.cancel()
@@ -172,6 +181,18 @@ object FSM {
     // TODO: Can be removed once we can break State#timeout signature to `Option[Duration]`
 
     /**
+     * JAVA API: Modify state transition descriptor to include a state timeout for the
+     * next state. This timeout overrides any default timeout set for the next
+     * state.
+     *
+     * Use Duration.Inf to deactivate an existing timeout.
+     */
+    def forMax(timeout: java.time.Duration): State[S, D] = {
+      import JavaDurationConverters._
+      forMax(timeout.asScala)
+    }
+
+    /**
      * Send reply to sender of the current message, if available.
      *
      * @return this state transition descriptor
@@ -238,7 +259,7 @@ object FSM {
  *     startWith(One, Data(42))
  *     when(One) {
  *         case Event(SomeMsg, Data(x)) => ...
- *         case Ev(SomeMsg) => ... // convenience when data not needed
+ *         case Event(SomeOtherMsg, _) => ... // when data not needed
  *     }
  *     when(Two, stateTimeout = 5 seconds) { ... }
  *     initialize()
@@ -419,7 +440,7 @@ trait FSM[S, D] extends Actor with Listeners with ActorLogging {
     if (timers contains name) {
       timers(name).cancel
     }
-    val timer = Timer(name, msg, repeat, timerGen.next)(context)
+    val timer = Timer(name, msg, repeat, timerGen.next, this)(context)
     timer.schedule(self, timeout)
     timers(name) = timer
   }
@@ -489,7 +510,7 @@ trait FSM[S, D] extends Actor with Listeners with ActorLogging {
   implicit final def total2pf(transitionHandler: (S, S) ⇒ Unit): TransitionHandler =
     new TransitionHandler {
       def isDefinedAt(in: (S, S)) = true
-      def apply(in: (S, S)) { transitionHandler(in._1, in._2) }
+      def apply(in: (S, S)): Unit = { transitionHandler(in._1, in._2) }
     }
 
   /**
@@ -586,7 +607,7 @@ trait FSM[S, D] extends Actor with Listeners with ActorLogging {
    * unhandled event handler
    */
   private val handleEventDefault: StateFunction = {
-    case Event(value, stateData) ⇒
+    case Event(value, _) ⇒
       log.warning("unhandled event " + value + " in state " + stateName)
       stay
   }
@@ -601,7 +622,7 @@ trait FSM[S, D] extends Actor with Listeners with ActorLogging {
    * transition handling
    */
   private var transitionEvent: List[TransitionHandler] = Nil
-  private def handleTransition(prev: S, next: S) {
+  private def handleTransition(prev: S, next: S): Unit = {
     val tuple = (prev, next)
     for (te ← transitionEvent) { if (te.isDefinedAt(tuple)) te(tuple) }
   }
@@ -616,8 +637,8 @@ trait FSM[S, D] extends Actor with Listeners with ActorLogging {
       if (generation == gen) {
         processMsg(StateTimeout, "state timeout")
       }
-    case t @ Timer(name, msg, repeat, gen) ⇒
-      if ((timers contains name) && (timers(name).generation == gen)) {
+    case t @ Timer(name, msg, repeat, gen, owner) ⇒
+      if ((owner eq this) && (timers contains name) && (timers(name).generation == gen)) {
         if (timeoutFuture.isDefined) {
           timeoutFuture.get.cancel()
           timeoutFuture = None
@@ -657,7 +678,7 @@ trait FSM[S, D] extends Actor with Listeners with ActorLogging {
     processEvent(event, source)
   }
 
-  private[akka] def processEvent(event: Event, source: AnyRef): Unit = {
+  private[akka] def processEvent(event: Event, @unused source: AnyRef): Unit = {
     val stateFunc = stateFunctions(currentState.stateName)
     val nextState = if (stateFunc isDefinedAt event) {
       stateFunc(event)
@@ -768,7 +789,7 @@ trait LoggingFSM[S, D] extends FSM[S, D] { this: Actor ⇒
   private var pos = 0
   private var full = false
 
-  private def advance() {
+  private def advance(): Unit = {
     val n = pos + 1
     if (n == logDepth) {
       full = true
@@ -781,10 +802,10 @@ trait LoggingFSM[S, D] extends FSM[S, D] { this: Actor ⇒
   private[akka] abstract override def processEvent(event: Event, source: AnyRef): Unit = {
     if (debugEvent) {
       val srcstr = source match {
-        case s: String            ⇒ s
-        case Timer(name, _, _, _) ⇒ "timer " + name
-        case a: ActorRef          ⇒ a.toString
-        case _                    ⇒ "unknown"
+        case s: String               ⇒ s
+        case Timer(name, _, _, _, _) ⇒ "timer " + name
+        case a: ActorRef             ⇒ a.toString
+        case _                       ⇒ "unknown"
       }
       log.debug("processing {} from {} in state {}", event, srcstr, stateName)
     }

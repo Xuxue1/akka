@@ -1,10 +1,14 @@
-/**
- * Copyright (C) 2015-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2015-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.impl.fusing
 
+import java.util.Collections
 import java.util.concurrent.atomic.AtomicReference
+
 import akka.NotUsed
+import akka.annotation.InternalApi
 import akka.stream.ActorAttributes.SupervisionStrategy
 import akka.stream._
 import akka.stream.impl.Stages.DefaultAttributes
@@ -12,19 +16,22 @@ import akka.stream.impl.SubscriptionTimeoutException
 import akka.stream.stage._
 import akka.stream.scaladsl._
 import akka.stream.actor.ActorSubscriberMessage
-import scala.collection.{ mutable, immutable }
+import akka.util.OptionVal
+import scala.collection.immutable
 import scala.concurrent.duration.FiniteDuration
 import scala.util.control.NonFatal
 import scala.annotation.tailrec
-import akka.stream.impl.PublisherSource
-import akka.stream.impl.CancellingSubscriber
+
 import akka.stream.impl.{ Buffer ⇒ BufferImpl }
-import scala.collection.JavaConversions._
+import scala.collection.JavaConverters._
+
+import akka.stream.impl.TraversalBuilder
+import akka.stream.impl.fusing.GraphStages.SingleSource
 
 /**
  * INTERNAL API
  */
-final class FlattenMerge[T, M](val breadth: Int) extends GraphStage[FlowShape[Graph[SourceShape[T], M], T]] {
+@InternalApi private[akka] final class FlattenMerge[T, M](val breadth: Int) extends GraphStage[FlowShape[Graph[SourceShape[T], M], T]] {
   private val in = Inlet[Graph[SourceShape[T], M]]("flatten.in")
   private val out = Outlet[T]("flatten.out")
 
@@ -33,17 +40,25 @@ final class FlattenMerge[T, M](val breadth: Int) extends GraphStage[FlowShape[Gr
 
   override def createLogic(enclosingAttributes: Attributes) = new GraphStageLogic(shape) {
     var sources = Set.empty[SubSinkInlet[T]]
-    def activeSources = sources.size
+    var pendingSingleSources = 0
+    def activeSources = sources.size + pendingSingleSources
 
-    var q: BufferImpl[SubSinkInlet[T]] = _
+    // To be able to optimize for SingleSource without materializing them the queue may hold either
+    // SubSinkInlet[T] or SingleSource
+    var queue: BufferImpl[AnyRef] = _
 
-    override def preStart(): Unit = q = BufferImpl(breadth, materializer)
+    override def preStart(): Unit = queue = BufferImpl(breadth, materializer)
 
     def pushOut(): Unit = {
-      val src = q.dequeue()
-      push(out, src.grab())
-      if (!src.isClosed) src.pull()
-      else removeSource(src)
+      queue.dequeue() match {
+        case src: SubSinkInlet[T] @unchecked ⇒
+          push(out, src.grab())
+          if (!src.isClosed) src.pull()
+          else removeSource(src)
+        case single: SingleSource[T] @unchecked ⇒
+          push(out, single.elem)
+          removeSource(single)
+      }
     }
 
     setHandler(in, new InHandler {
@@ -64,31 +79,48 @@ final class FlattenMerge[T, M](val breadth: Int) extends GraphStage[FlowShape[Gr
 
     val outHandler = new OutHandler {
       // could be unavailable due to async input having been executed before this notification
-      override def onPull(): Unit = if (q.nonEmpty && isAvailable(out)) pushOut()
+      override def onPull(): Unit = if (queue.nonEmpty && isAvailable(out)) pushOut()
     }
 
     def addSource(source: Graph[SourceShape[T], M]): Unit = {
-      val sinkIn = new SubSinkInlet[T]("FlattenMergeSink")
-      sinkIn.setHandler(new InHandler {
-        override def onPush(): Unit = {
-          if (isAvailable(out)) {
-            push(out, sinkIn.grab())
-            sinkIn.pull()
+      // If it's a SingleSource or wrapped such we can push the element directly instead of materializing it.
+      // Have to use AnyRef because of OptionVal null value.
+      TraversalBuilder.getSingleSource(source.asInstanceOf[Graph[SourceShape[AnyRef], M]]) match {
+        case OptionVal.Some(single) ⇒
+          if (isAvailable(out) && queue.isEmpty) {
+            push(out, single.elem.asInstanceOf[T])
           } else {
-            q.enqueue(sinkIn)
+            queue.enqueue(single)
+            pendingSingleSources += 1
           }
-        }
-        override def onUpstreamFinish(): Unit = if (!sinkIn.isAvailable) removeSource(sinkIn)
-      })
-      sinkIn.pull()
-      sources += sinkIn
-      val graph = Source.fromGraph(source).to(sinkIn.sink)
-      interpreter.subFusingMaterializer.materialize(graph, initialAttributes = enclosingAttributes)
+        case _ ⇒
+          val sinkIn = new SubSinkInlet[T]("FlattenMergeSink")
+          sinkIn.setHandler(new InHandler {
+            override def onPush(): Unit = {
+              if (isAvailable(out)) {
+                push(out, sinkIn.grab())
+                sinkIn.pull()
+              } else {
+                queue.enqueue(sinkIn)
+              }
+            }
+            override def onUpstreamFinish(): Unit = if (!sinkIn.isAvailable) removeSource(sinkIn)
+          })
+          sinkIn.pull()
+          sources += sinkIn
+          val graph = Source.fromGraph(source).to(sinkIn.sink)
+          interpreter.subFusingMaterializer.materialize(graph, defaultAttributes = enclosingAttributes)
+      }
     }
 
-    def removeSource(src: SubSinkInlet[T]): Unit = {
+    def removeSource(src: AnyRef): Unit = {
       val pullSuppressed = activeSources == breadth
-      sources -= src
+      src match {
+        case sub: SubSinkInlet[T] @unchecked ⇒
+          sources -= sub
+        case _: SingleSource[_] ⇒
+          pendingSingleSources -= 1
+      }
       if (pullSuppressed) tryPull(in)
       if (activeSources == 0 && isClosed(in)) completeStage()
     }
@@ -103,7 +135,7 @@ final class FlattenMerge[T, M](val breadth: Int) extends GraphStage[FlowShape[Gr
 /**
  * INTERNAL API
  */
-final class PrefixAndTail[T](val n: Int) extends GraphStage[FlowShape[T, (immutable.Seq[T], Source[T, NotUsed])]] {
+@InternalApi private[akka] final class PrefixAndTail[T](val n: Int) extends GraphStage[FlowShape[T, (immutable.Seq[T], Source[T, NotUsed])]] {
   val in: Inlet[T] = Inlet("PrefixAndTail.in")
   val out: Outlet[(immutable.Seq[T], Source[T, NotUsed])] = Outlet("PrefixAndTail.out")
   override val shape: FlowShape[T, (immutable.Seq[T], Source[T, NotUsed])] = FlowShape(in, out)
@@ -211,7 +243,7 @@ final class PrefixAndTail[T](val n: Int) extends GraphStage[FlowShape[T, (immuta
 /**
  * INTERNAL API
  */
-final class GroupBy[T, K](val maxSubstreams: Int, val keyFor: T ⇒ K) extends GraphStage[FlowShape[T, Source[T, NotUsed]]] {
+@InternalApi private[akka] final class GroupBy[T, K](val maxSubstreams: Int, val keyFor: T ⇒ K, val allowClosedSubstreamRecreation: Boolean = false) extends GraphStage[FlowShape[T, Source[T, NotUsed]]] {
   val in: Inlet[T] = Inlet("GroupBy.in")
   val out: Outlet[Source[T, NotUsed]] = Outlet("GroupBy.out")
   override val shape: FlowShape[T, Source[T, NotUsed]] = FlowShape(in, out)
@@ -219,9 +251,10 @@ final class GroupBy[T, K](val maxSubstreams: Int, val keyFor: T ⇒ K) extends G
 
   override def createLogic(inheritedAttributes: Attributes): GraphStageLogic = new TimerGraphStageLogic(shape) with OutHandler with InHandler {
     parent ⇒
-    lazy val decider = inheritedAttributes.get[SupervisionStrategy].map(_.decider).getOrElse(Supervision.stoppingDecider)
+
+    lazy val decider = inheritedAttributes.mandatoryAttribute[SupervisionStrategy].decider
     private val activeSubstreamsMap = new java.util.HashMap[Any, SubstreamSource]()
-    private val closedSubstreams = new java.util.HashSet[Any]()
+    private val closedSubstreams = if (allowClosedSubstreamRecreation) Collections.unmodifiableSet(Collections.emptySet[Any]) else new java.util.HashSet[Any]()
     private var timeout: FiniteDuration = _
     private var substreamWaitingToBePushed: Option[SubstreamSource] = None
     private var nextElementKey: K = null.asInstanceOf[K]
@@ -229,6 +262,8 @@ final class GroupBy[T, K](val maxSubstreams: Int, val keyFor: T ⇒ K) extends G
     private var _nextId = 0
     private val substreamsJustStared = new java.util.HashSet[Any]()
     private var firstPushCounter: Int = 0
+
+    private val tooManySubstreamsOpenException = new TooManySubstreamsOpenException
 
     private def nextId(): Long = { _nextId += 1; _nextId }
 
@@ -241,17 +276,25 @@ final class GroupBy[T, K](val maxSubstreams: Int, val keyFor: T ⇒ K) extends G
 
     private def tryCompleteAll(): Boolean =
       if (activeSubstreamsMap.isEmpty || (!hasNextElement && firstPushCounter == 0)) {
-        for (value ← activeSubstreamsMap.values()) value.complete()
+        for (value ← activeSubstreamsMap.values().asScala) value.complete()
+        completeStage()
+        true
+      } else false
+
+    private def tryCancel(): Boolean =
+      // if there's no active substreams or there's only one but it's not been pushed yet
+      if (activeSubstreamsMap.isEmpty || (activeSubstreamsMap.size == substreamWaitingToBePushed.size)) {
         completeStage()
         true
       } else false
 
     private def fail(ex: Throwable): Unit = {
-      for (value ← activeSubstreamsMap.values()) value.fail(ex)
+      for (value ← activeSubstreamsMap.values().asScala) value.fail(ex)
       failStage(ex)
     }
 
-    private def needToPull: Boolean = !(hasBeenPulled(in) || isClosed(in) || hasNextElement)
+    private def needToPull: Boolean =
+      !(hasBeenPulled(in) || isClosed(in) || hasNextElement || substreamWaitingToBePushed.nonEmpty)
 
     override def preStart(): Unit =
       timeout = ActorMaterializerHelper.downcast(interpreter.materializer).settings.subscriptionTimeoutSettings.timeout
@@ -275,8 +318,9 @@ final class GroupBy[T, K](val maxSubstreams: Int, val keyFor: T ⇒ K) extends G
 
     override def onUpstreamFailure(ex: Throwable): Unit = fail(ex)
 
-    override def onDownstreamFinish(): Unit =
-      if (activeSubstreamsMap.isEmpty) completeStage() else setKeepGoing(true)
+    override def onUpstreamFinish(): Unit = if (!tryCompleteAll()) setKeepGoing(true)
+
+    override def onDownstreamFinish(): Unit = if (!tryCancel()) setKeepGoing(true)
 
     override def onPush(): Unit = try {
       val elem = grab(in)
@@ -290,8 +334,8 @@ final class GroupBy[T, K](val maxSubstreams: Int, val keyFor: T ⇒ K) extends G
           nextElementValue = elem
         }
       } else {
-        if (activeSubstreamsMap.size == maxSubstreams)
-          fail(new IllegalStateException(s"Cannot open substream for key '$key': too many substreams open"))
+        if (activeSubstreamsMap.size + closedSubstreams.size == maxSubstreams)
+          throw tooManySubstreamsOpenException
         else if (closedSubstreams.contains(key) && !hasBeenPulled(in))
           pull(in)
         else runSubstream(key, elem)
@@ -302,10 +346,6 @@ final class GroupBy[T, K](val maxSubstreams: Int, val keyFor: T ⇒ K) extends G
           case Supervision.Stop                         ⇒ fail(ex)
           case Supervision.Resume | Supervision.Restart ⇒ if (!hasBeenPulled(in)) pull(in)
         }
-    }
-
-    override def onUpstreamFinish(): Unit = {
-      if (!tryCompleteAll()) setKeepGoing(true)
     }
 
     private def runSubstream(key: K, value: T): Unit = {
@@ -326,8 +366,9 @@ final class GroupBy[T, K](val maxSubstreams: Int, val keyFor: T ⇒ K) extends G
     override protected def onTimer(timerKey: Any): Unit = {
       val substreamSource = activeSubstreamsMap.get(timerKey)
       if (substreamSource != null) {
-        substreamSource.timeout(timeout)
-        closedSubstreams.add(timerKey)
+        if (!allowClosedSubstreamRecreation) {
+          closedSubstreams.add(timerKey)
+        }
         activeSubstreamsMap.remove(timerKey)
         if (isClosed(in)) tryCompleteAll()
       }
@@ -341,7 +382,9 @@ final class GroupBy[T, K](val maxSubstreams: Int, val keyFor: T ⇒ K) extends G
       private def completeSubStream(): Unit = {
         complete()
         activeSubstreamsMap.remove(key)
-        closedSubstreams.add(key)
+        if (!allowClosedSubstreamRecreation) {
+          closedSubstreams.add(key)
+        }
       }
 
       private def tryCompleteHandler(): Unit = {
@@ -371,6 +414,7 @@ final class GroupBy[T, K](val maxSubstreams: Int, val keyFor: T ⇒ K) extends G
         if (hasNextElement && nextElementKey == key) clearNextElement()
         if (firstPush()) firstPushCounter -= 1
         completeSubStream()
+        if (parent.isClosed(out)) tryCancel()
         if (parent.isClosed(in)) tryCompleteAll() else if (needToPull) pull(in)
       }
 
@@ -384,7 +428,7 @@ final class GroupBy[T, K](val maxSubstreams: Int, val keyFor: T ⇒ K) extends G
 /**
  * INTERNAL API
  */
-object Split {
+@InternalApi private[akka] object Split {
   sealed abstract class SplitDecision
 
   /** Splits before the current element. The current element will be the first element in the new substream. */
@@ -403,7 +447,7 @@ object Split {
 /**
  * INTERNAL API
  */
-final class Split[T](val decision: Split.SplitDecision, val p: T ⇒ Boolean, val substreamCancelStrategy: SubstreamCancelStrategy) extends GraphStage[FlowShape[T, Source[T, NotUsed]]] {
+@InternalApi private[akka] final class Split[T](val decision: Split.SplitDecision, val p: T ⇒ Boolean, val substreamCancelStrategy: SubstreamCancelStrategy) extends GraphStage[FlowShape[T, Source[T, NotUsed]]] {
   val in: Inlet[T] = Inlet("Split.in")
   val out: Outlet[Source[T, NotUsed]] = Outlet("Split.out")
   override val shape: FlowShape[T, Source[T, NotUsed]] = FlowShape(in, out)
@@ -429,22 +473,19 @@ final class Split[T](val decision: Split.SplitDecision, val p: T ⇒ Boolean, va
 
     setHandler(out, new OutHandler {
       override def onPull(): Unit = {
-        if (substreamSource eq null) pull(in)
-        else if (!substreamWaitingToBePushed) {
-          push(out, Source.fromGraph(substreamSource.source))
-          scheduleOnce(SubscriptionTimer, timeout)
-          substreamWaitingToBePushed = true
-        }
+        if (substreamSource eq null) {
+          //can be already pulled from substream in case split after
+          if (!hasBeenPulled(in)) pull(in)
+        } else if (substreamWaitingToBePushed) pushSubstreamSource()
       }
 
       override def onDownstreamFinish(): Unit = {
         // If the substream is already cancelled or it has not been handed out, we can go away
-        if (!substreamWaitingToBePushed || substreamCancelled) completeStage()
+        if ((substreamSource eq null) || substreamWaitingToBePushed || substreamCancelled) completeStage()
       }
     })
 
-    // initial input handler
-    setHandler(in, new InHandler {
+    val initInHandler = new InHandler {
       override def onPush(): Unit = {
         val handler = new SubstreamHandler
         val elem = grab(in)
@@ -460,7 +501,10 @@ final class Split[T](val decision: Split.SplitDecision, val p: T ⇒ Boolean, va
         handOver(handler)
       }
       override def onUpstreamFinish(): Unit = completeStage()
-    })
+    }
+
+    // initial input handler
+    setHandler(in, initInHandler)
 
     private def handOver(handler: SubstreamHandler): Unit = {
       if (isClosed(out)) completeStage()
@@ -472,11 +516,15 @@ final class Split[T](val decision: Split.SplitDecision, val p: T ⇒ Boolean, va
         setKeepGoing(enabled = handler.hasInitialElement)
 
         if (isAvailable(out)) {
-          push(out, Source.fromGraph(substreamSource.source))
-          scheduleOnce(SubscriptionTimer, timeout)
-          substreamWaitingToBePushed = true
-        } else substreamWaitingToBePushed = false
+          if (decision == SplitBefore || handler.hasInitialElement) pushSubstreamSource() else pull(in)
+        } else substreamWaitingToBePushed = true
       }
+    }
+
+    private def pushSubstreamSource(): Unit = {
+      push(out, Source.fromGraph(substreamSource.source))
+      scheduleOnce(SubscriptionTimer, timeout)
+      substreamWaitingToBePushed = false
     }
 
     override protected def onTimer(timerKey: Any): Unit = substreamSource.timeout(timeout)
@@ -503,6 +551,7 @@ final class Split[T](val decision: Split.SplitDecision, val p: T ⇒ Boolean, va
       }
 
       override def onPull(): Unit = {
+        cancelTimer(SubscriptionTimer)
         if (hasInitialElement) {
           substreamSource.push(firstElem)
           firstElem = null.asInstanceOf[T]
@@ -530,7 +579,12 @@ final class Split[T](val decision: Split.SplitDecision, val p: T ⇒ Boolean, va
           if (p(elem)) {
             val handler = new SubstreamHandler
             closeThis(handler, elem)
-            handOver(handler)
+            if (decision == SplitBefore) handOver(handler)
+            else {
+              substreamSource = null
+              setHandler(in, initInHandler)
+              pull(in)
+            }
           } else {
             // Drain into the void
             if (substreamCancelled) pull(in)
@@ -562,7 +616,24 @@ final class Split[T](val decision: Split.SplitDecision, val p: T ⇒ Boolean, va
 /**
  * INTERNAL API
  */
-object SubSink {
+@InternalApi private[stream] object SubSink {
+  sealed trait State
+  /** Not yet materialized and no command has been scheduled */
+  case object Uninitialized extends State
+
+  /** A command was scheduled before materialization */
+  sealed abstract class CommandScheduledBeforeMaterialization(val command: Command) extends State
+
+  // preallocated instances for both commands
+  /** A RequestOne command was scheduled before materialization */
+  case object RequestOneScheduledBeforeMaterialization extends CommandScheduledBeforeMaterialization(RequestOne)
+  /** A Cancel command was scheduled before materialization */
+  case object CancelScheduledBeforeMaterialization extends CommandScheduledBeforeMaterialization(Cancel)
+
+  /** Steady state: sink has been materialized, commands can be delivered through the callback */
+  // Represented in unwrapped form as AsyncCallback[Command] directly to prevent a level of indirection
+  // case class Materialized(callback: AsyncCallback[Command]) extends State
+
   sealed trait Command
   case object RequestOne extends Command
   case object Cancel extends Command
@@ -571,32 +642,36 @@ object SubSink {
 /**
  * INTERNAL API
  */
-final class SubSink[T](name: String, externalCallback: ActorSubscriberMessage ⇒ Unit)
+@InternalApi private[stream] final class SubSink[T](name: String, externalCallback: ActorSubscriberMessage ⇒ Unit)
   extends GraphStage[SinkShape[T]] {
   import SubSink._
 
-  private val in = Inlet[T]("SubSink.in")
+  private val in = Inlet[T](s"SubSink($name).in")
 
   override def initialAttributes = Attributes.name(s"SubSink($name)")
   override val shape = SinkShape(in)
 
-  private val status = new AtomicReference[AnyRef]
+  private val status = new AtomicReference[ /* State */ AnyRef](Uninitialized)
 
-  def pullSubstream(): Unit = {
+  def pullSubstream(): Unit = dispatchCommand(RequestOneScheduledBeforeMaterialization)
+  def cancelSubstream(): Unit = dispatchCommand(CancelScheduledBeforeMaterialization)
+
+  @tailrec
+  private def dispatchCommand(newState: CommandScheduledBeforeMaterialization): Unit =
     status.get match {
-      case f: AsyncCallback[Any] @unchecked ⇒ f.invoke(RequestOne)
-      case null ⇒
-        if (!status.compareAndSet(null, RequestOne))
-          status.get.asInstanceOf[Command ⇒ Unit](RequestOne)
-    }
-  }
+      case /* Materialized */ callback: AsyncCallback[Command @unchecked] ⇒ callback.invoke(newState.command)
+      case Uninitialized ⇒
+        if (!status.compareAndSet(Uninitialized, newState))
+          dispatchCommand(newState) // changed to materialized in the meantime
 
-  def cancelSubstream(): Unit = status.get match {
-    case f: AsyncCallback[Any] @unchecked ⇒ f.invoke(Cancel)
-    case x ⇒ // a potential RequestOne is overwritten
-      if (!status.compareAndSet(x, Cancel))
-        status.get.asInstanceOf[Command ⇒ Unit](Cancel)
-  }
+      case RequestOneScheduledBeforeMaterialization if newState == CancelScheduledBeforeMaterialization ⇒
+        // cancellation is allowed to replace pull
+        if (!status.compareAndSet(RequestOneScheduledBeforeMaterialization, newState))
+          dispatchCommand(RequestOneScheduledBeforeMaterialization)
+
+      case cmd: CommandScheduledBeforeMaterialization ⇒
+        throw new IllegalStateException(s"${newState.command} on subsink is illegal when ${cmd.command} is still pending")
+    }
 
   override def createLogic(attr: Attributes) = new GraphStageLogic(shape) with InHandler {
     setHandler(in, this)
@@ -605,65 +680,43 @@ final class SubSink[T](name: String, externalCallback: ActorSubscriberMessage �
     override def onUpstreamFinish(): Unit = externalCallback(ActorSubscriberMessage.OnComplete)
     override def onUpstreamFailure(ex: Throwable): Unit = externalCallback(ActorSubscriberMessage.OnError(ex))
 
-    @tailrec private def setCB(cb: AsyncCallback[Command]): Unit = {
+    @tailrec
+    private def setCallback(callback: Command ⇒ Unit): Unit =
       status.get match {
-        case null ⇒
-          if (!status.compareAndSet(null, cb)) setCB(cb)
-        case RequestOne ⇒
-          pull(in)
-          if (!status.compareAndSet(RequestOne, cb)) setCB(cb)
-        case Cancel ⇒
-          completeStage()
-          if (!status.compareAndSet(Cancel, cb)) setCB(cb)
-        case _: AsyncCallback[_] ⇒
+        case Uninitialized ⇒
+          if (!status.compareAndSet(Uninitialized, /* Materialized */ getAsyncCallback[Command](callback)))
+            setCallback(callback)
+
+        case cmd: CommandScheduledBeforeMaterialization ⇒
+          if (status.compareAndSet(cmd, /* Materialized */ getAsyncCallback[Command](callback)))
+            // between those two lines a new command might have been scheduled, but that will go through the
+            // async interface, so that the ordering is still kept
+            callback(cmd.command)
+          else
+            setCallback(callback)
+
+        case m: /* Materialized */ AsyncCallback[Command @unchecked] ⇒
           failStage(new IllegalStateException("Substream Source cannot be materialized more than once"))
       }
-    }
 
-    override def preStart(): Unit = {
-      val ourOwnCallback = getAsyncCallback[Command] {
+    override def preStart(): Unit =
+      setCallback {
         case RequestOne ⇒ tryPull(in)
         case Cancel     ⇒ completeStage()
-        case _          ⇒ throw new IllegalStateException("Bug")
       }
-      setCB(ourOwnCallback)
-    }
   }
 
   override def toString: String = name
 }
 
-object SubSource {
-  /**
-   * INTERNAL API
-   *
-   * HERE ACTUALLY ARE DRAGONS, YOU HAVE BEEN WARNED!
-   *
-   * FIXME #19240
-   */
-  private[akka] def kill[T, M](s: Source[T, M]): Unit = {
-    s.module match {
-      case GraphStageModule(_, _, stage: SubSource[_]) ⇒
-        stage.externalCallback.invoke(SubSink.Cancel)
-      case pub: PublisherSource[_] ⇒
-        pub.create(null)._1.subscribe(new CancellingSubscriber)
-      case m ⇒
-        GraphInterpreter.currentInterpreterOrNull match {
-          case null ⇒ throw new UnsupportedOperationException(s"cannot drop Source of type ${m.getClass.getName}")
-          case intp ⇒ s.runWith(Sink.ignore)(intp.subFusingMaterializer)
-        }
-    }
-  }
-}
-
 /**
  * INTERNAL API
  */
-final class SubSource[T](name: String, private[fusing] val externalCallback: AsyncCallback[SubSink.Command])
+@InternalApi private[akka] final class SubSource[T](name: String, private[fusing] val externalCallback: AsyncCallback[SubSink.Command])
   extends GraphStage[SourceShape[T]] {
   import SubSink._
 
-  val out: Outlet[T] = Outlet("SubSource.out")
+  val out: Outlet[T] = Outlet(s"SubSource($name).out")
   override def initialAttributes = Attributes.name(s"SubSource($name)")
   override val shape: SourceShape[T] = SourceShape(out)
 

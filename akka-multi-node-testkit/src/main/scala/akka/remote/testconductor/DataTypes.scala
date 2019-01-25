@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.remote.testconductor
 
 import language.implicitConversions
@@ -75,8 +76,8 @@ private[akka] class MsgEncoder extends OneToOneEncoder {
     case x: NetworkOp ⇒
       val w = TCP.Wrapper.newBuilder
       x match {
-        case Hello(name, addr) ⇒
-          w.setHello(TCP.Hello.newBuilder.setName(name).setAddress(addr))
+        case Hello(name, address) ⇒
+          w.setHello(TCP.Hello.newBuilder.setName(name).setAddress(address))
         case EnterBarrier(name, timeout) ⇒
           val barrier = TCP.EnterBarrier.newBuilder.setName(name)
           timeout foreach (t ⇒ barrier.setTimeout(t.toNanos))
@@ -101,8 +102,8 @@ private[akka] class MsgEncoder extends OneToOneEncoder {
           w.setFailure(TCP.InjectFailure.newBuilder.setFailure(TCP.FailType.ShutdownAbrupt))
         case GetAddress(node) ⇒
           w.setAddr(TCP.AddressRequest.newBuilder.setNode(node.name))
-        case AddressReply(node, addr) ⇒
-          w.setAddr(TCP.AddressRequest.newBuilder.setNode(node.name).setAddr(addr))
+        case AddressReply(node, address) ⇒
+          w.setAddr(TCP.AddressRequest.newBuilder.setNode(node.name).setAddr(address))
         case _: Done ⇒
           w.setDone("")
       }

@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.camel.internal
 
 import org.apache.camel.util.ExchangeHelper
@@ -78,8 +79,8 @@ private[camel] class CamelExchangeAdapter(val exchange: Exchange) {
    *                in the exchange.
    */
   def toAkkaCamelException(headers: Map[String, Any]): AkkaCamelException = {
-    import scala.collection.JavaConversions._
-    new AkkaCamelException(exchange.getException, headers ++ response.getHeaders)
+    import scala.collection.JavaConverters._
+    new AkkaCamelException(exchange.getException, headers ++ response.getHeaders.asScala)
   }
 
   /**
@@ -94,8 +95,8 @@ private[camel] class CamelExchangeAdapter(val exchange: Exchange) {
    *                in the Camel message.
    */
   def toFailureResult(headers: Map[String, Any]): FailureResult = {
-    import scala.collection.JavaConversions._
-    FailureResult(exchange.getException, headers ++ response.getHeaders)
+    import scala.collection.JavaConverters._
+    FailureResult(exchange.getException, headers ++ response.getHeaders.asScala)
   }
 
   /**

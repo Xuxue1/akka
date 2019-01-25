@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.scaladsl
 
 import scala.collection.immutable
@@ -9,7 +10,7 @@ import scala.concurrent.duration._
 import scala.util.control.NoStackTrace
 import akka.stream._
 import akka.stream.testkit._
-import akka.stream.testkit.Utils._
+import akka.stream.testkit.scaladsl.StreamTestKit._
 
 class FlowPrefixAndTailSpec extends StreamSpec {
 

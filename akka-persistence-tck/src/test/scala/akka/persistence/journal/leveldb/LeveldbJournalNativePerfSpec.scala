@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2014-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2014-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.persistence.journal.leveldb
 
 import akka.persistence.journal.{ JournalPerfSpec }
@@ -16,5 +17,7 @@ class LeveldbJournalNativePerfSpec extends JournalPerfSpec(
   with PluginCleanup {
 
   override def supportsRejectingNonSerializableObjects = true
+
+  override def supportsSerialization = true
 
 }

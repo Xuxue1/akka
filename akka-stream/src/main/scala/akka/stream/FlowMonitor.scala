@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2015-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2015-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream
 
 import akka.stream.FlowMonitorState.StreamState
@@ -59,5 +60,5 @@ object FlowMonitorState {
   /**
    * Java API
    */
-  def finished[U]() = Finished
+  def finished[U](): StreamState[U] = Finished
 }

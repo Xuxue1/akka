@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2014-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2014-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.scaladsl
 
 import akka.NotUsed
@@ -9,8 +10,7 @@ import scala.concurrent.duration._
 import akka.stream.ActorMaterializer
 import akka.stream.ActorMaterializerSettings
 import akka.stream.testkit._
-import akka.stream.testkit.Utils._
-import akka.testkit.EventFilter
+import akka.stream.testkit.scaladsl.StreamTestKit._
 
 class FlowIteratorSpec extends AbstractFlowIteratorSpec {
   override def testName = "A Flow based on an iterator producing function"
@@ -37,9 +37,7 @@ class FlowIterableSpec extends AbstractFlowIteratorSpec {
     sub.request(1)
     c.expectNext(1)
     c.expectNoMsg(100.millis)
-    EventFilter[IllegalStateException](message = "not two", occurrences = 1).intercept {
-      sub.request(2)
-    }
+    sub.request(2)
     c.expectError().getMessage should be("not two")
     sub.request(2)
     c.expectNoMsg(100.millis)

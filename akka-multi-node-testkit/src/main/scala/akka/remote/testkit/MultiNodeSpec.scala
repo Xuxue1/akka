@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.remote.testkit
 
 import language.implicitConversions
@@ -8,19 +9,23 @@ import java.net.{ InetAddress, InetSocketAddress }
 
 import com.typesafe.config.{ Config, ConfigFactory, ConfigObject }
 
-import scala.concurrent.{ Await, Awaitable, Future }
+import scala.concurrent.{ Await, Awaitable }
 import scala.util.control.NonFatal
 import scala.collection.immutable
 import akka.actor._
 import akka.util.Timeout
-import akka.remote.testconductor.{ RoleName, TestConductor, TestConductorExt }
+import akka.remote.testconductor.{ TestConductor, TestConductorExt }
 import akka.testkit._
+import akka.testkit.TestKit
 import akka.testkit.TestEvent._
 
 import scala.concurrent.duration._
 import akka.remote.testconductor.RoleName
 import akka.actor.RootActorPath
 import akka.event.{ Logging, LoggingAdapter }
+import akka.remote.RemoteTransportException
+import org.jboss.netty.channel.ChannelException
+import akka.util.ccompat._
 
 /**
  * Configure the role names and participants of the test, including configuration settings.
@@ -214,6 +219,8 @@ object MultiNodeSpec {
         loggers = ["akka.testkit.TestEventListener"]
         loglevel = "WARNING"
         stdout-loglevel = "WARNING"
+        coordinated-shutdown.terminate-actor-system = off
+        coordinated-shutdown.run-by-jvm-shutdown-hook = off
         actor {
           default-dispatcher {
             executor = "fork-join-executor"
@@ -233,7 +240,8 @@ object MultiNodeSpec {
   }
 
   private def getCallerName(clazz: Class[_]): String = {
-    val s = Thread.currentThread.getStackTrace map (_.getClassName) drop 1 dropWhile (_ matches ".*MultiNodeSpec.?$")
+    val pattern = s"(akka\\.remote\\.testkit\\.MultiNodeSpec.*|akka\\.remote\\.RemotingMultiNodeSpec)"
+    val s = Thread.currentThread.getStackTrace.map(_.getClassName).drop(1).dropWhile(_.matches(pattern))
     val reduced = s.lastIndexWhere(_ == clazz.getName) match {
       case -1 ⇒ s
       case z  ⇒ s drop (z + 1)
@@ -255,9 +263,27 @@ abstract class MultiNodeSpec(val myself: RoleName, _system: ActorSystem, _roles:
 
   import MultiNodeSpec._
 
+  /**
+   * Constructor for using arbitrary logic to create the actor system used in
+   * the multi node spec (the `Config` passed to the creator must be used in
+   * the created actor system for the multi node tests to work)
+   */
+  def this(config: MultiNodeConfig, actorSystemCreator: Config ⇒ ActorSystem) =
+    this(config.myself, actorSystemCreator(ConfigFactory.load(config.config)), config.roles, config.deployments)
+
   def this(config: MultiNodeConfig) =
-    this(config.myself, ActorSystem(MultiNodeSpec.getCallerName(classOf[MultiNodeSpec]), ConfigFactory.load(config.config)),
-      config.roles, config.deployments)
+    this(config, {
+      val name = MultiNodeSpec.getCallerName(classOf[MultiNodeSpec])
+      config ⇒
+        try {
+          ActorSystem(name, config)
+        } catch {
+          // Retry creating the system once as when using port = 0 two systems may try and use the same one.
+          // RTE is for aeron, CE for netty
+          case _: RemoteTransportException ⇒ ActorSystem(name, config)
+          case _: ChannelException         ⇒ ActorSystem(name, config)
+        }
+    })
 
   val log: LoggingAdapter = Logging(system, this.getClass)
 
@@ -265,31 +291,31 @@ abstract class MultiNodeSpec(val myself: RoleName, _system: ActorSystem, _roles:
    * Enrich `.await()` onto all Awaitables, using remaining duration from the innermost
    * enclosing `within` block or QueryTimeout.
    */
-  implicit def awaitHelper[T](w: Awaitable[T]) = new AwaitHelper(w)
+  implicit def awaitHelper[T](w: Awaitable[T]): AwaitHelper[T] = new AwaitHelper(w)
   class AwaitHelper[T](w: Awaitable[T]) {
     def await: T = Await.result(w, remainingOr(testConductor.Settings.QueryTimeout.duration))
   }
 
-  final override def multiNodeSpecBeforeAll {
+  final override def multiNodeSpecBeforeAll: Unit = {
     atStartup()
   }
 
-  final override def multiNodeSpecAfterAll {
+  final override def multiNodeSpecAfterAll: Unit = {
     // wait for all nodes to remove themselves before we shut the conductor down
     if (selfIndex == 0) {
       testConductor.removeNode(myself)
       within(testConductor.Settings.BarrierTimeout.duration) {
-        awaitCond {
+        awaitCond({
           // Await.result(testConductor.getNodes, remaining).filterNot(_ == myself).isEmpty
-          testConductor.getNodes.await.filterNot(_ == myself).isEmpty
-        }
+          testConductor.getNodes.await.forall(_ == myself)
+        }, message = s"Nodes not shutdown: ${testConductor.getNodes.await}")
       }
     }
-    shutdown(system)
+    shutdown(system, duration = shutdownTimeout)
     afterTermination()
   }
 
-  def shutdownTimeout: FiniteDuration = 5.seconds.dilated
+  def shutdownTimeout: FiniteDuration = 15.seconds.dilated
 
   /**
    * Override this and return `true` to assert that the
@@ -358,7 +384,7 @@ abstract class MultiNodeSpec(val myself: RoleName, _system: ActorSystem, _roles:
   def enterBarrier(name: String*): Unit =
     testConductor.enter(
       Timeout.durationToTimeout(remainingOr(testConductor.Settings.BarrierTimeout.duration)),
-      name.to[immutable.Seq])
+      name.to(immutable.Seq))
 
   /**
    * Query the controller for the transport address of the given node (by role name) and
@@ -409,7 +435,7 @@ abstract class MultiNodeSpec(val myself: RoleName, _system: ActorSystem, _roles:
   protected def injectDeployments(sys: ActorSystem, role: RoleName): Unit = {
     val deployer = sys.asInstanceOf[ExtendedActorSystem].provider.deployer
     deployments(role) foreach { str ⇒
-      val deployString = (str /: replacements) {
+      val deployString = replacements.foldLeft(str) {
         case (base, r @ Replacement(tag, _)) ⇒
           base.indexOf(tag) match {
             case -1 ⇒ base

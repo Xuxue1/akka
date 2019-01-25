@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2014-2015 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2014-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.cluster.ddata;
 
 option java_package = "akka.cluster.ddata.protobuf.msg";
@@ -12,6 +13,7 @@ message GSet {
   repeated sint32 intElements = 2 [packed=true];
   repeated sint64 longElements = 3 [packed=true];
   repeated OtherMessage otherElements = 4;
+  repeated string actorRefElements = 5; // added in Akka 2.5.14
 }
 
 message ORSet {
@@ -21,7 +23,22 @@ message ORSet {
   repeated sint32 intElements = 4 [packed=true];
   repeated sint64 longElements = 5 [packed=true];
   repeated OtherMessage otherElements = 6;
+  repeated string actorRefElements = 7; // added in Akka 2.5.14
+}
+
+message ORSetDeltaGroup {
+  message Entry {
+    required ORSetDeltaOp operation = 1;
+    required ORSet underlying = 2;
+  }
   
+  repeated Entry entries = 1;
+}
+
+enum ORSetDeltaOp {
+  Add = 0;
+  Remove = 1;
+  Full = 2;
 }
 
 message Flag {
@@ -48,53 +65,83 @@ message PNCounter {
   required GCounter decrements = 2;
 }
 
-message VersionVector {
-  message Entry {
-    required UniqueAddress node = 1;
-    required int64 version = 2;
-  }
-  repeated Entry entries = 1;
-}
-
 message ORMap {
   message Entry {
-    required string key = 1;
+    optional string stringKey = 1;
     required OtherMessage value = 2;
+    optional sint32 intKey = 3;
+    optional sint64 longKey = 4;
+    optional OtherMessage otherKey = 5;
   }
   
   required ORSet keys = 1;
-  repeated Entry entries = 2;  
+  repeated Entry entries = 2;
+}
+
+message ORMapDeltaGroup {
+  message MapEntry {
+    optional string stringKey = 1;
+    optional OtherMessage value = 2;
+    optional sint32 intKey = 3;
+    optional sint64 longKey = 4;
+    optional OtherMessage otherKey = 5;
+  }
+  message Entry {
+    required ORMapDeltaOp operation = 1;
+    required ORSet underlying = 2;
+    required sint32 zeroTag = 3;
+    repeated MapEntry entryData = 4;
+  }
+
+  repeated Entry entries = 1;
+}
+
+enum ORMapDeltaOp {
+  ORMapPut = 0;
+  ORMapRemove = 1;
+  ORMapRemoveKey = 2;
+  ORMapUpdate = 3;
 }
 
 message LWWMap {
   message Entry {
-    required string key = 1;
+    optional string stringKey = 1;
     required LWWRegister value = 2;
+    optional sint32 intKey = 3;
+    optional sint64 longKey = 4;
+    optional OtherMessage otherKey = 5;
   }
   
   required ORSet keys = 1;
-  repeated Entry entries = 2;  
+  repeated Entry entries = 2;
 }
 
 message PNCounterMap {
   message Entry {
-    required string key = 1;
+    optional string stringKey = 1;
     required PNCounter value = 2;
+    optional sint32 intKey = 3;
+    optional sint64 longKey = 4;
+    optional OtherMessage otherKey = 5;
   }
   
   required ORSet keys = 1;
-  repeated Entry entries = 2;  
+  repeated Entry entries = 2;
 }
 
 message ORMultiMap {
-  message Entry {
-    required string key = 1;
-    required ORSet value = 2;
-  }
-  
-  required ORSet keys = 1;
-  repeated Entry entries = 2;  
-}
+   message Entry {
+     optional string stringKey = 1;
+     required ORSet value = 2;
+     optional sint32 intKey = 3;
+     optional sint64 longKey = 4;
+     optional OtherMessage otherKey = 5;
+   }
+
+   required ORSet keys = 1;
+   repeated Entry entries = 2;
+   optional bool withValueDeltas = 3;
+ }
 
 
 

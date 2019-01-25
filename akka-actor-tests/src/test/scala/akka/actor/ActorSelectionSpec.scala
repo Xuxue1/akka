@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.actor
 
 import language.postfixOps
@@ -35,7 +36,7 @@ object ActorSelectionSpec {
 
 }
 
-class ActorSelectionSpec extends AkkaSpec("akka.loglevel=DEBUG") with DefaultTimeout {
+class ActorSelectionSpec extends AkkaSpec with DefaultTimeout {
   import ActorSelectionSpec._
 
   val c1 = system.actorOf(p, "c1")
@@ -119,6 +120,11 @@ class ActorSelectionSpec extends AkkaSpec("akka.loglevel=DEBUG") with DefaultTim
       // not equal because it's terminated
       identify(a1.path) should ===(None)
 
+      // wait till path is freed
+      awaitCond {
+        system.asInstanceOf[ExtendedActorSystem].provider.resolveActorRef(a1.path) != a1
+      }
+
       val a2 = system.actorOf(p, name)
       a2.path should ===(a1.path)
       a2.path.toString should ===(a1.path.toString)
@@ -178,7 +184,7 @@ class ActorSelectionSpec extends AkkaSpec("akka.loglevel=DEBUG") with DefaultTim
     val all = Seq(c1, c2, c21)
 
     "select actors by their path" in {
-      def check(looker: ActorRef, pathOf: ActorRef, result: ActorRef) {
+      def check(looker: ActorRef, pathOf: ActorRef, result: ActorRef): Unit = {
         askNode(looker, SelectPath(pathOf.path)) should ===(Some(result))
       }
       for {
@@ -188,7 +194,7 @@ class ActorSelectionSpec extends AkkaSpec("akka.loglevel=DEBUG") with DefaultTim
     }
 
     "select actors by their string path representation" in {
-      def check(looker: ActorRef, pathOf: ActorRef, result: ActorRef) {
+      def check(looker: ActorRef, pathOf: ActorRef, result: ActorRef): Unit = {
         askNode(looker, SelectString(pathOf.path.toStringWithoutAddress)) should ===(Some(result))
         // with trailing /
         askNode(looker, SelectString(pathOf.path.toStringWithoutAddress + "/")) should ===(Some(result))
@@ -200,7 +206,7 @@ class ActorSelectionSpec extends AkkaSpec("akka.loglevel=DEBUG") with DefaultTim
     }
 
     "select actors by their root-anchored relative path" in {
-      def check(looker: ActorRef, pathOf: ActorRef, result: ActorRef) {
+      def check(looker: ActorRef, pathOf: ActorRef, result: ActorRef): Unit = {
         askNode(looker, SelectString(pathOf.path.toStringWithoutAddress)) should ===(Some(result))
         askNode(looker, SelectString(pathOf.path.elements.mkString("/", "/", "/"))) should ===(Some(result))
       }
@@ -211,7 +217,7 @@ class ActorSelectionSpec extends AkkaSpec("akka.loglevel=DEBUG") with DefaultTim
     }
 
     "select actors by their relative path" in {
-      def check(looker: ActorRef, result: ActorRef, elems: String*) {
+      def check(looker: ActorRef, result: ActorRef, elems: String*): Unit = {
         askNode(looker, SelectString(elems mkString "/")) should ===(Some(result))
         askNode(looker, SelectString(elems mkString ("", "/", "/"))) should ===(Some(result))
       }
@@ -226,7 +232,7 @@ class ActorSelectionSpec extends AkkaSpec("akka.loglevel=DEBUG") with DefaultTim
     }
 
     "find system-generated actors" in {
-      def check(target: ActorRef) {
+      def check(target: ActorRef): Unit = {
         for (looker ← all) {
           askNode(looker, SelectPath(target.path)) should ===(Some(target))
           askNode(looker, SelectString(target.path.toString)) should ===(Some(target))
@@ -241,11 +247,11 @@ class ActorSelectionSpec extends AkkaSpec("akka.loglevel=DEBUG") with DefaultTim
     "return deadLetters or ActorIdentity(None), respectively, for non-existing paths" in {
       import scala.collection.JavaConverters._
 
-      def checkOne(looker: ActorRef, query: Query, result: Option[ActorRef]) {
+      def checkOne(looker: ActorRef, query: Query, result: Option[ActorRef]): Unit = {
         val lookup = askNode(looker, query)
         lookup should ===(result)
       }
-      def check(looker: ActorRef) {
+      def check(looker: ActorRef): Unit = {
         val lookname = looker.path.elements.mkString("", "/", "/")
         for (
           (l, r) ← Seq(
@@ -298,7 +304,7 @@ class ActorSelectionSpec extends AkkaSpec("akka.loglevel=DEBUG") with DefaultTim
         case `c2` ⇒ lastSender
       }
       actors should ===(Seq(c21))
-      expectNoMsg(1 second)
+      expectNoMsg(200.millis)
     }
 
     "resolve one actor with explicit timeout" in {

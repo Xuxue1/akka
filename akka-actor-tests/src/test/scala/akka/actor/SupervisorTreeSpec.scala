@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.actor
 
 import language.postfixOps
@@ -22,7 +23,7 @@ class SupervisorTreeSpec extends AkkaSpec("akka.actor.serialize-messages = off")
             def receive = {
               case p: Props ⇒ sender() ! context.actorOf(p)
             }
-            override def preRestart(cause: Throwable, msg: Option[Any]) { testActor ! self.path }
+            override def preRestart(cause: Throwable, msg: Option[Any]): Unit = { testActor ! self.path }
           })
           val headActor = system.actorOf(p)
           val middleActor = Await.result((headActor ? p).mapTo[ActorRef], timeout.duration)

@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.event
 
 import scala.concurrent.duration._
@@ -44,7 +45,7 @@ class AddressTerminatedTopicBenchSpec extends AkkaSpec("akka.loglevel=INFO") {
         shutdown(sys, 10.seconds, verifySystemShutdown = true)
         log.info("Stopping {} actors took {} ms", num, (System.nanoTime() - t2).nanos.toMillis)
       } finally {
-        if (!sys.isTerminated) shutdown(sys)
+        shutdown(sys)
       }
     }
 

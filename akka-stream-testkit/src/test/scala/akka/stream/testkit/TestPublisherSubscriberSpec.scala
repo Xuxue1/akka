@@ -1,12 +1,13 @@
-/**
- * Copyright (C) 2015-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2015-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.testkit
 
 import akka.stream.scaladsl.{ Sink, Source }
 import akka.stream.testkit.TestPublisher._
 import akka.stream.testkit.TestSubscriber._
-import akka.stream.testkit.Utils._
+import akka.stream.testkit.scaladsl.StreamTestKit._
 import akka.stream.{ ActorMaterializer, ActorMaterializerSettings }
 import org.reactivestreams.Subscription
 import akka.testkit.AkkaSpec
@@ -30,7 +31,7 @@ class TestPublisherSubscriberSpec extends AkkaSpec {
 
       upstreamSubscription.sendNext(1)
       downstreamSubscription.request(1)
-      upstream.expectEventPF { case RequestMore(_, e) ⇒ e } should ===(1)
+      upstream.expectEventPF { case RequestMore(_, e) ⇒ e } should ===(1L)
       downstream.expectEventPF { case OnNext(e) ⇒ e } should ===(1)
 
       upstreamSubscription.sendNext(1)
@@ -69,7 +70,7 @@ class TestPublisherSubscriberSpec extends AkkaSpec {
         .expectSubscription()
         .request(10)
 
-      upstream.expectRequest() should ===(10)
+      upstream.expectRequest() should ===(10L)
       upstream.sendNext(1)
       downstream.expectNext(1)
     }

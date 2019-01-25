@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.testkit.metrics
 
 import com.codahale.metrics._
@@ -54,10 +55,12 @@ private[akka] trait MetricsKitOps extends MetricKeyDSL {
     registry.histogram((key / "histogram").toString)
   }
 
+  def forceGcEnabled: Boolean = true
+
   /** Yet another delegate to `System.gc()` */
-  def gc() {
-    // todo add some form of logging, to differentiate manual gc calls from "normal" ones
-    System.gc()
+  def gc(): Unit = {
+    if (forceGcEnabled)
+      System.gc()
   }
 
   /**

@@ -1,14 +1,12 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
-package akka.remote
 
-import java.util.concurrent.ThreadLocalRandom
+package akka.remote
 
 import akka.actor._
 import akka.remote.transport._
 import akka.testkit._
-import akka.util.ByteString
 import com.typesafe.config._
 
 import scala.concurrent.duration._
@@ -23,12 +21,12 @@ object RemoteDeploymentWhitelistSpec {
       case x             ⇒ target = sender(); sender() ! x
     }
 
-    override def preStart() {}
-    override def preRestart(cause: Throwable, msg: Option[Any]) {
+    override def preStart(): Unit = {}
+    override def preRestart(cause: Throwable, msg: Option[Any]): Unit = {
       target ! "preRestart"
     }
-    override def postRestart(cause: Throwable) {}
-    override def postStop() {
+    override def postRestart(cause: Throwable): Unit = {}
+    override def postStop(): Unit = {
       target ! "postStop"
     }
   }
@@ -41,12 +39,12 @@ object RemoteDeploymentWhitelistSpec {
       case x             ⇒ target = sender(); sender() ! x
     }
 
-    override def preStart() {}
-    override def preRestart(cause: Throwable, msg: Option[Any]) {
+    override def preStart(): Unit = {}
+    override def preRestart(cause: Throwable, msg: Option[Any]): Unit = {
       target ! "preRestart"
     }
-    override def postRestart(cause: Throwable) {}
-    override def postStop() {
+    override def postRestart(cause: Throwable): Unit = {}
+    override def postStop(): Unit = {
       target ! "postStop"
     }
   }
@@ -83,7 +81,7 @@ object RemoteDeploymentWhitelistSpec {
     }
   """)
 
-  def muteSystem(system: ActorSystem) {
+  def muteSystem(system: ActorSystem): Unit = {
     system.eventStream.publish(TestEvent.Mute(
       EventFilter.error(start = "AssociationError"),
       EventFilter.warning(start = "AssociationError"),
@@ -123,7 +121,7 @@ class RemoteDeploymentWhitelistSpec extends AkkaSpec(RemoteDeploymentWhitelistSp
       EventFilter.warning(pattern = "received dead letter.*(InboundPayload|Disassociate|HandleListener)")))
   }
 
-  override def afterTermination() {
+  override def afterTermination(): Unit = {
     shutdown(remoteSystem)
     AssociationRegistry.clear()
   }

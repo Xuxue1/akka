@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2015-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2015-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.pattern
 
 import scala.concurrent.duration._
@@ -15,13 +16,15 @@ import akka.actor.SupervisorStrategy._
  * with ``akka.pattern.Backoff.onFailure``.
  */
 private class BackoffOnRestartSupervisor(
-  val childProps: Props,
-  val childName:  String,
-  minBackoff:     FiniteDuration,
-  maxBackoff:     FiniteDuration,
-  val reset:      BackoffReset,
-  randomFactor:   Double,
-  strategy:       OneForOneStrategy)
+  val childProps:        Props,
+  val childName:         String,
+  minBackoff:            FiniteDuration,
+  maxBackoff:            FiniteDuration,
+  val reset:             BackoffReset,
+  randomFactor:          Double,
+  strategy:              OneForOneStrategy,
+  val replyWhileStopped: Option[Any],
+  val finalStopMessage:  Option[Any ⇒ Boolean])
   extends Actor with HandleBackoff
   with ActorLogging {
 
@@ -38,7 +41,7 @@ private class BackoffOnRestartSupervisor(
         // Whatever the final Directive is, we will translate all Restarts
         // to our own Restarts, which involves stopping the child.
         case Restart ⇒
-          if (strategy.withinTimeRange.isFinite() && restartCount == 0) {
+          if (strategy.withinTimeRange.isFinite && restartCount == 0) {
             // If the user has defined a time range for the maxNrOfRetries, we'll schedule a message
             // to ourselves every time that range elapses, to reset the restart counter. We hide it
             // behind this conditional to avoid queuing the message unnecessarily
@@ -73,10 +76,11 @@ private class BackoffOnRestartSupervisor(
   }
 
   def onTerminated: Receive = {
-    case Terminated(child) ⇒
-      log.debug(s"Terminating, because child [$child] terminated itself")
+    case Terminated(c) ⇒
+      log.debug(s"Terminating, because child [$c] terminated itself")
       stop(self)
   }
 
   def receive = onTerminated orElse handleBackoff
+
 }

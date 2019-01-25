@@ -1,19 +1,25 @@
-/**
- * Copyright (C) 2015-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2015-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.scaladsl
 
 import akka.NotUsed
 import akka.stream.stage.{ GraphStage, GraphStageLogic, OutHandler }
 import akka.stream._
-import akka.stream.testkit.Utils.assertAllStagesStopped
+import akka.stream.testkit.Utils.TE
+import akka.stream.testkit.scaladsl.StreamTestKit._
 
 import scala.concurrent._
 import scala.concurrent.duration._
+
+import akka.stream.impl.TraversalBuilder
+import akka.stream.impl.fusing.GraphStages.SingleSource
 import akka.stream.testkit.{ StreamSpec, TestPublisher }
 import org.scalatest.exceptions.TestFailedException
 import akka.stream.testkit.scaladsl.TestSink
 import akka.testkit.TestLatch
+import akka.util.OptionVal
 
 class FlowFlattenMergeSpec extends StreamSpec {
   implicit val materializer = ActorMaterializer()
@@ -91,6 +97,22 @@ class FlowFlattenMergeSpec extends StreamSpec {
           .runWith(Sink.head)
           .futureValue
       }.cause.get should ===(ex)
+    }
+
+    "bubble up substream materialization exception" in assertAllStagesStopped {
+      val matFail = TE("fail!")
+      object FailingInnerMat extends GraphStage[SourceShape[String]] {
+        val out = Outlet[String]("out")
+        val shape = SourceShape(out)
+        override def createLogic(inheritedAttributes: Attributes): GraphStageLogic = new GraphStageLogic(shape) {
+          throw matFail
+        }
+      }
+
+      val result = Source.single(()).flatMapMerge(4, _ ⇒ Source.fromGraph(FailingInnerMat)).runWith(Sink.ignore)
+
+      result.failed.futureValue should ===(matFail)
+
     }
 
     "cancel substreams when failing from main stream" in assertAllStagesStopped {
@@ -178,8 +200,7 @@ class FlowFlattenMergeSpec extends StreamSpec {
           }
           setHandler(out, this)
         }
-      }
-    )
+      })
 
     "propagate attributes to inner streams" in assertAllStagesStopped {
       val f = Source.single(attributesSource.addAttributes(Attributes.name("inner")))
@@ -190,7 +211,87 @@ class FlowFlattenMergeSpec extends StreamSpec {
       val attributes = Await.result(f, 3.seconds).attributeList
       attributes should contain(Attributes.Name("inner"))
       attributes should contain(Attributes.Name("outer"))
-      attributes.indexOf(Attributes.Name("outer")) < attributes.indexOf(Attributes.Name("inner")) should be(true)
+      attributes.indexOf(Attributes.Name("inner")) < attributes.indexOf(Attributes.Name("outer")) should be(true)
+    }
+
+    "work with optimized Source.single" in assertAllStagesStopped {
+      Source(0 to 3)
+        .flatMapConcat(Source.single)
+        .runWith(toSeq)
+        .futureValue should ===(0 to 3)
+    }
+
+    "work with optimized Source.single when slow demand" in assertAllStagesStopped {
+      val probe = Source(0 to 4)
+        .flatMapConcat(Source.single)
+        .runWith(TestSink.probe)
+
+      probe.request(3)
+      probe.expectNext(0)
+      probe.expectNext(1)
+      probe.expectNext(2)
+      probe.expectNoMessage(100.millis)
+
+      probe.request(10)
+      probe.expectNext(3)
+      probe.expectNext(4)
+      probe.expectComplete()
+    }
+
+    "work with mix of Source.single and other sources when slow demand" in assertAllStagesStopped {
+      val sources: Source[Source[Int, NotUsed], NotUsed] = Source(List(
+        Source.single(0),
+        Source.single(1),
+        Source(2 to 4),
+        Source.single(5),
+        Source(6 to 6),
+        Source.single(7),
+        Source(8 to 10),
+        Source.single(11)
+      ))
+
+      val probe =
+        sources
+          .flatMapConcat(identity)
+          .runWith(TestSink.probe)
+
+      probe.request(3)
+      probe.expectNext(0)
+      probe.expectNext(1)
+      probe.expectNext(2)
+      probe.expectNoMessage(100.millis)
+
+      probe.request(1)
+      probe.expectNext(3)
+      probe.expectNoMessage(100.millis)
+
+      probe.request(1)
+      probe.expectNext(4)
+      probe.expectNoMessage(100.millis)
+
+      probe.request(3)
+      probe.expectNext(5)
+      probe.expectNext(6)
+      probe.expectNext(7)
+      probe.expectNoMessage(100.millis)
+
+      probe.request(10)
+      probe.expectNext(8)
+      probe.expectNext(9)
+      probe.expectNext(10)
+      probe.expectNext(11)
+      probe.expectComplete()
+    }
+
+    "find Source.single via TraversalBuilder" in assertAllStagesStopped {
+      TraversalBuilder.getSingleSource(Source.single("a")).get.elem should ===("a")
+      TraversalBuilder.getSingleSource(Source(List("a", "b"))) should be(OptionVal.None)
+
+      val singleSourceA = new SingleSource("a")
+      TraversalBuilder.getSingleSource(singleSourceA) should be(OptionVal.Some(singleSourceA))
+
+      TraversalBuilder.getSingleSource(Source.single("c").async) should be(OptionVal.None)
+      TraversalBuilder.getSingleSource(Source.single("d").mapMaterializedValue(_ ⇒ "Mat")) should be(OptionVal.None)
     }
 
   }

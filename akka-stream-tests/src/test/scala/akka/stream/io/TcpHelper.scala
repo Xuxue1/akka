@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.io
 
 import akka.actor._
@@ -12,7 +13,7 @@ import akka.testkit.{ TestKitBase, TestProbe }
 import akka.util.ByteString
 import java.net.InetSocketAddress
 import scala.collection.immutable.Queue
-import akka.stream.testkit.TestUtils.temporaryServerAddress
+import akka.testkit.SocketUtil.temporaryServerAddress
 
 import scala.concurrent.duration._
 

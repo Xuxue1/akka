@@ -1,15 +1,17 @@
-/**
- * Copyright (C) 2015-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2015-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.stream.scaladsl
 
 import akka.actor.Status
 import akka.pattern.pipe
 import akka.stream.Attributes.inputBuffer
-import akka.stream.ActorMaterializer
-import akka.stream.testkit.Utils._
+import akka.stream.{ ActorMaterializer, StreamDetachedException }
+import akka.stream.testkit.scaladsl.StreamTestKit._
 import akka.stream.testkit._
-import scala.concurrent.Await
+
+import scala.concurrent.{ Await, Promise }
 import scala.concurrent.duration._
 import scala.util.control.NoStackTrace
 
@@ -54,7 +56,7 @@ class QueueSinkSpec extends StreamSpec {
       val sub = probe.expectSubscription()
 
       queue.pull().pipeTo(testActor)
-      expectNoMsg(noMsgTimeout)
+      expectNoMessage(noMsgTimeout)
 
       sub.sendNext(1)
       expectMsg(Some(1))
@@ -68,7 +70,7 @@ class QueueSinkSpec extends StreamSpec {
       val sub = probe.expectSubscription()
 
       queue.pull().pipeTo(testActor)
-      expectNoMsg(noMsgTimeout)
+      expectNoMessage(noMsgTimeout)
 
       sub.sendError(ex)
       expectMsg(Status.Failure(ex))
@@ -83,13 +85,21 @@ class QueueSinkSpec extends StreamSpec {
       the[Exception] thrownBy { Await.result(queue.pull(), remainingOrDefault) } should be(ex)
     }
 
+    "fail future immediately if stream already canceled" in assertAllStagesStopped {
+      val queue = Source.empty[Int].runWith(Sink.queue())
+      // race here because no way to observe that queue sink saw termination
+      awaitAssert({
+        queue.pull().failed.futureValue shouldBe a[StreamDetachedException]
+      })
+    }
+
     "timeout future when stream cannot provide data" in assertAllStagesStopped {
       val probe = TestPublisher.manualProbe[Int]()
       val queue = Source.fromPublisher(probe).runWith(Sink.queue())
       val sub = probe.expectSubscription()
 
       queue.pull().pipeTo(testActor)
-      expectNoMsg(noMsgTimeout)
+      expectNoMessage(noMsgTimeout)
 
       sub.sendNext(1)
       expectMsg(Some(1))
@@ -109,7 +119,7 @@ class QueueSinkSpec extends StreamSpec {
       sub.sendComplete()
       Await.result(queue.pull(), noMsgTimeout) should be(None)
 
-      queue.pull().onFailure { case e ⇒ e.isInstanceOf[IllegalStateException] should ===(true) }
+      queue.pull().failed.futureValue shouldBe an[StreamDetachedException]
     }
 
     "keep on sending even after the buffer has been full" in assertAllStagesStopped {
@@ -117,11 +127,12 @@ class QueueSinkSpec extends StreamSpec {
       val streamElementCount = bufferSize + 4
       val sink = Sink.queue[Int]()
         .withAttributes(inputBuffer(bufferSize, bufferSize))
-      val (probe, queue) = Source(1 to streamElementCount)
-        .alsoToMat(Flow[Int].take(bufferSize).watchTermination()(Keep.right).to(Sink.ignore))(Keep.right)
-        .toMat(sink)(Keep.both)
+      val bufferFullProbe = Promise[akka.Done.type]
+      val queue = Source(1 to streamElementCount)
+        .alsoTo(Flow[Int].drop(bufferSize - 1).to(Sink.foreach(_ ⇒ bufferFullProbe.trySuccess(akka.Done))))
+        .toMat(sink)(Keep.right)
         .run()
-      probe.futureValue should ===(akka.Done)
+      bufferFullProbe.future.futureValue should ===(akka.Done)
       for (i ← 1 to streamElementCount) {
         queue.pull() pipeTo testActor
         expectMsg(Some(i))
@@ -153,7 +164,7 @@ class QueueSinkSpec extends StreamSpec {
       expectMsg(Some(1))
 
       queue.pull().pipeTo(testActor)
-      expectNoMsg() // element requested but buffer empty
+      expectNoMessage(200.millis) // element requested but buffer empty
       sub.sendNext(2)
       expectMsg(Some(2))
 

@@ -1,6 +1,5 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
- * Copyright (C) 2012-2016 Eligotech BV.
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.persistence.snapshot.local
@@ -14,22 +13,24 @@ import akka.persistence.serialization._
 import akka.persistence.snapshot._
 import akka.serialization.SerializationExtension
 import akka.util.ByteString.UTF_8
+import akka.util.ccompat._
+import com.typesafe.config.Config
 
 import scala.collection.immutable
 import scala.concurrent.Future
 import scala.util._
+import java.nio.file.Files
 
 /**
  * INTERNAL API
  *
  * Local filesystem backed snapshot store.
  */
-private[persistence] class LocalSnapshotStore extends SnapshotStore with ActorLogging {
+private[persistence] class LocalSnapshotStore(config: Config) extends SnapshotStore with ActorLogging {
   private val FilenamePattern = """^snapshot-(.+)-(\d+)-(\d+)""".r
   private val persistenceIdStartIdx = 9 // Persistence ID starts after the "snapshot-" substring
 
   import akka.util.Helpers._
-  private val config = context.system.settings.config.getConfig("akka.persistence.snapshot-store.local")
   private val maxLoadAttempts = config.getInt("max-load-attempts")
     .requiring(_ > 1, "max-load-attempts must be >= 1")
 
@@ -76,7 +77,7 @@ private[persistence] class LocalSnapshotStore extends SnapshotStore with ActorLo
     val metadatas = snapshotMetadatas(persistenceId, criteria)
     Future.sequence {
       metadatas.map(deleteAsync)
-    }(collection.breakOut, streamDispatcher).map(_ ⇒ ())(streamDispatcher)
+    }(scala.collection.immutable.IndexedSeq, streamDispatcher).map(_ ⇒ ())(streamDispatcher)
   }
 
   override def receivePluginInternal: Receive = {
@@ -115,22 +116,23 @@ private[persistence] class LocalSnapshotStore extends SnapshotStore with ActorLo
   protected def deserialize(inputStream: InputStream): Snapshot =
     serializationExtension.deserialize(streamToBytes(inputStream), classOf[Snapshot]).get
 
-  protected def serialize(outputStream: OutputStream, snapshot: Snapshot): Unit =
-    outputStream.write(serializationExtension.findSerializerFor(snapshot).toBinary(snapshot))
+  protected def serialize(outputStream: OutputStream, snapshot: Snapshot): Unit = {
+    outputStream.write(serializationExtension.serialize(snapshot).get)
+  }
 
   protected def withOutputStream(metadata: SnapshotMetadata)(p: (OutputStream) ⇒ Unit): File = {
     val tmpFile = snapshotFileForWrite(metadata, extension = "tmp")
-    withStream(new BufferedOutputStream(new FileOutputStream(tmpFile)), p)
+    withStream(new BufferedOutputStream(Files.newOutputStream(tmpFile.toPath())), p)
     tmpFile
   }
 
   private def withInputStream[T](metadata: SnapshotMetadata)(p: (InputStream) ⇒ T): T =
-    withStream(new BufferedInputStream(new FileInputStream(snapshotFileForWrite(metadata))), p)
+    withStream(new BufferedInputStream(Files.newInputStream(snapshotFileForWrite(metadata).toPath())), p)
 
   private def withStream[A <: Closeable, B](stream: A, p: A ⇒ B): B =
     try { p(stream) } finally { stream.close() }
 
-  /** Only by persistenceId and sequenceNr, timestamp is informational - accomodates for 2.13.x series files */
+  /** Only by persistenceId and sequenceNr, timestamp is informational - accommodates for 2.13.x series files */
   protected def snapshotFileForWrite(metadata: SnapshotMetadata, extension: String = ""): File =
     new File(snapshotDir, s"snapshot-${URLEncoder.encode(metadata.persistenceId, UTF_8)}-${metadata.sequenceNr}-${metadata.timestamp}${extension}")
 
@@ -146,7 +148,7 @@ private[persistence] class LocalSnapshotStore extends SnapshotStore with ActorLo
     }
   }
 
-  override def preStart() {
+  override def preStart(): Unit = {
     snapshotDir()
     super.preStart()
   }

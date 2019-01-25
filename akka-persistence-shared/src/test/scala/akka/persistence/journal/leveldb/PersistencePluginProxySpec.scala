@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.persistence.journal.leveldb
@@ -89,7 +89,7 @@ class PersistencePluginProxySpec extends AkkaSpec(PersistencePluginProxySpec.sta
   val systemA = ActorSystem("SysA", config)
   val systemB = ActorSystem("SysB", targetAddressConfig(system) withFallback PersistencePluginProxySpec.config)
 
-  override protected def afterTermination() {
+  override protected def afterTermination(): Unit = {
     shutdown(systemA)
     shutdown(systemB)
     super.afterTermination()

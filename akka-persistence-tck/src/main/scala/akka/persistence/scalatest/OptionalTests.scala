@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.persistence.scalatest
@@ -18,7 +18,7 @@ trait OptionalTests {
     if (flag.value)
       try test catch {
         case ex: Exception ⇒
-          throw new AssertionError("Imlpementation did not pass this spec. " +
+          throw new AssertionError("Implementation did not pass this spec. " +
             "If your journal will be (by definition) unable to abide the here tested rule, you can disable this test," +
             s"by overriding [${flag.name}] with CapabilityFlag.off in your test class.")
       }

@@ -1,3 +1,7 @@
+/*
+ * Copyright (C) 2018-2019 Lightbend Inc. <https://www.lightbend.com>
+ */
+
 package akka.dispatch
 
 import language.postfixOps
@@ -44,7 +48,7 @@ class PriorityDispatcherSpec extends AkkaSpec(PriorityDispatcherSpec.config) wit
     }
   }
 
-  def testOrdering(dispatcherKey: String) {
+  def testOrdering(dispatcherKey: String): Unit = {
     val msgs = (1 to 100) toList
 
     // It's important that the actor under test is not a top level actor

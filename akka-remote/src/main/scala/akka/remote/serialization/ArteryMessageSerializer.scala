@@ -1,7 +1,10 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.remote.serialization
+
+import java.io.NotSerializableException
 
 import akka.actor.{ ActorRef, Address, ExtendedActorSystem }
 import akka.protobuf.MessageLite
@@ -91,7 +94,7 @@ private[akka] final class ArteryMessageSerializer(val system: ExtendedActorSyste
     case ClassManifestCompressionAdvertisementAckManifest ⇒ deserializeCompressionTableAdvertisementAck(bytes, ClassManifestCompressionAdvertisementAck)
     case ArteryHeartbeatManifest ⇒ RemoteWatcher.ArteryHeartbeat
     case ArteryHeartbeatRspManifest ⇒ deserializeArteryHeartbeatRsp(bytes, ArteryHeartbeatRsp)
-    case _ ⇒ throw new IllegalArgumentException(s"Manifest '$manifest' not defined for ArteryControlMessageSerializer (serializer id $identifier)")
+    case _ ⇒ throw new NotSerializableException(s"Manifest '$manifest' not defined for ArteryControlMessageSerializer (serializer id $identifier)")
   }
 
   import scala.collection.JavaConverters._
@@ -177,9 +180,9 @@ private[akka] final class ArteryMessageSerializer(val system: ExtendedActorSyste
 
     SystemMessageDelivery.SystemMessageEnvelope(
       serialization.deserialize(
-      protoEnv.getMessage.toByteArray,
-      protoEnv.getSerializerId,
-      if (protoEnv.hasMessageManifest) protoEnv.getMessageManifest.toStringUtf8 else "").get,
+        protoEnv.getMessage.toByteArray,
+        protoEnv.getSerializerId,
+        if (protoEnv.hasMessageManifest) protoEnv.getMessageManifest.toStringUtf8 else "").get,
       protoEnv.getSeqNo,
       deserializeUniqueAddress(protoEnv.getAckReplyTo))
   }

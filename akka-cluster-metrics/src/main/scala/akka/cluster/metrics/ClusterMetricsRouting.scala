@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.cluster.metrics
 
 import java.util.Arrays
@@ -121,7 +122,7 @@ final case class AdaptiveLoadBalancingRoutingLogic(system: ActorSystem, metricsS
 @SerialVersionUID(1L)
 final case class AdaptiveLoadBalancingPool(
   metricsSelector:                 MetricsSelector    = MixMetricsSelector,
-  override val nrOfInstances:      Int                = 0,
+  val nrOfInstances:               Int                = 0,
   override val supervisorStrategy: SupervisorStrategy = Pool.defaultSupervisorStrategy,
   override val routerDispatcher:   String             = Dispatchers.DefaultDispatcherId,
   override val usePoolDispatcher:  Boolean            = false)
@@ -203,7 +204,7 @@ final case class AdaptiveLoadBalancingPool(
 @SerialVersionUID(1L)
 final case class AdaptiveLoadBalancingGroup(
   metricsSelector:               MetricsSelector            = MixMetricsSelector,
-  override val paths:            immutable.Iterable[String] = Nil,
+  val paths:                     immutable.Iterable[String] = Nil,
   override val routerDispatcher: String                     = Dispatchers.DefaultDispatcherId)
   extends Group {
 
@@ -367,12 +368,13 @@ abstract class MixMetricsSelectorBase(selectors: immutable.IndexedSeq[CapacityMe
   override def capacity(nodeMetrics: Set[NodeMetrics]): Map[Address, Double] = {
     val combined: immutable.IndexedSeq[(Address, Double)] = selectors.flatMap(_.capacity(nodeMetrics).toSeq)
     // aggregated average of the capacities by address
-    combined.foldLeft(Map.empty[Address, (Double, Int)].withDefaultValue((0.0, 0))) {
+    val init: Map[Address, (Double, Int)] = Map.empty.withDefaultValue((0.0, 0))
+    combined.foldLeft(init) {
       case (acc, (address, capacity)) ⇒
         val (sum, count) = acc(address)
         acc + (address → ((sum + capacity, count + 1)))
     }.map {
-      case (addr, (sum, count)) ⇒ addr → (sum / count)
+      case (address, (sum, count)) ⇒ address → (sum / count)
     }
   }
 
@@ -434,7 +436,7 @@ abstract class CapacityMetricsSelector extends MetricsSelector {
       val (_, min) = capacity.minBy { case (_, c) ⇒ c }
       // lowest usable capacity is 1% (>= 0.5% will be rounded to weight 1), also avoids div by zero
       val divisor = math.max(0.01, min)
-      capacity map { case (addr, c) ⇒ (addr → math.round((c) / divisor).toInt) }
+      capacity map { case (address, c) ⇒ (address → math.round((c) / divisor).toInt) }
     }
   }
 
@@ -468,7 +470,7 @@ private[metrics] class WeightedRoutees(routees: immutable.IndexedSeq[Routee], se
         case a                         ⇒ a
       }
     }
-    val buckets = Array.ofDim[Int](routees.size)
+    val buckets = new Array[Int](routees.size)
     val meanWeight = if (weights.isEmpty) 1 else weights.values.sum / weights.size
     val w = weights.withDefaultValue(meanWeight) // we don’t necessarily have metrics for all addresses
     var i = 0

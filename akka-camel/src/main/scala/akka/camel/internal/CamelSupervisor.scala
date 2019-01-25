@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.camel.internal
 
 import akka.actor._
@@ -145,9 +146,9 @@ private[camel] class Registry(activationTracker: ActorRef) extends Actor with Ca
       }
   }
 
-  private def deRegisterConsumer(actorRef: ActorRef) { consumerRegistrar ! DeRegister(actorRef) }
+  private def deRegisterConsumer(actorRef: ActorRef): Unit = { consumerRegistrar ! DeRegister(actorRef) }
 
-  private def deRegisterProducer(actorRef: ActorRef) { producerRegistrar ! DeRegister(actorRef) }
+  private def deRegisterProducer(actorRef: ActorRef): Unit = { producerRegistrar ! DeRegister(actorRef) }
 }
 
 /**

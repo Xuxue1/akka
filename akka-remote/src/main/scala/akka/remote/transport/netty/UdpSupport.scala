@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.remote.transport.netty
 
 import akka.actor.Address
@@ -16,6 +17,7 @@ import scala.concurrent.{ Future, Promise }
 /**
  * INTERNAL API
  */
+@deprecated("Deprecated in favour of Artery (the new Aeron/UDP based remoting implementation).", since = "2.5.0")
 private[remote] trait UdpHandlers extends CommonHandlers {
 
   override def createHandle(channel: Channel, localAddress: Address, remoteAddress: Address): AssociationHandle =
@@ -53,8 +55,11 @@ private[remote] trait UdpHandlers extends CommonHandlers {
 /**
  * INTERNAL API
  */
+@deprecated("Deprecated in favour of Artery (the new Aeron/UDP based remoting implementation).", since = "2.5.0")
 private[remote] class UdpServerHandler(_transport: NettyTransport, _associationListenerFuture: Future[AssociationEventListener])
   extends ServerHandler(_transport, _associationListenerFuture) with UdpHandlers {
+
+  transport.system.log.warning("The netty.udp transport is deprecated, please use Artery instead. See: http://doc.akka.io/docs/akka/2.4/scala/remoting-artery.html")
 
   override def initUdp(channel: Channel, remoteSocketAddress: SocketAddress, msg: ChannelBuffer): Unit =
     initInbound(channel, remoteSocketAddress, msg)
@@ -63,8 +68,11 @@ private[remote] class UdpServerHandler(_transport: NettyTransport, _associationL
 /**
  * INTERNAL API
  */
+@deprecated("Deprecated in favour of Artery (the new Aeron/UDP based remoting implementation).", since = "2.5.0")
 private[remote] class UdpClientHandler(_transport: NettyTransport, remoteAddress: Address)
   extends ClientHandler(_transport, remoteAddress) with UdpHandlers {
+
+  transport.system.log.warning("The netty.udp transport is deprecated, please use Artery instead. See: http://doc.akka.io/docs/akka/2.4/scala/remoting-artery.html")
 
   override def initUdp(channel: Channel, remoteSocketAddress: SocketAddress, msg: ChannelBuffer): Unit =
     initOutbound(channel, remoteSocketAddress, msg)

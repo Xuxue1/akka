@@ -1,3 +1,7 @@
+/*
+ * Copyright (C) 2018-2019 Lightbend Inc. <https://www.lightbend.com>
+ */
+
 package akka.japi;
 
 import scala.collection.Seq;
@@ -8,5 +12,4 @@ public class JAPI {
   public static <T> Seq<T> seq(T... ts) {
     return Util.immutableSeq(ts);
   }
-  
 }

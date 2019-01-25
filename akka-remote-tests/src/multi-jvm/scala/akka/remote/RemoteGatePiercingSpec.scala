@@ -1,19 +1,17 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.remote
 
 import akka.remote.transport.AssociationHandle
 
-import language.postfixOps
 import scala.concurrent.duration._
 import com.typesafe.config.ConfigFactory
 import akka.actor._
 import akka.remote.testconductor.RoleName
-import akka.remote.transport.ThrottlerTransportAdapter.{ ForceDisassociateExplicitly, ForceDisassociate, Direction }
+import akka.remote.transport.ThrottlerTransportAdapter.ForceDisassociateExplicitly
 import akka.remote.testkit.MultiNodeConfig
-import akka.remote.testkit.MultiNodeSpec
-import akka.remote.testkit.STMultiNodeSpec
 import akka.testkit._
 import akka.actor.ActorIdentity
 import akka.remote.testconductor.RoleName

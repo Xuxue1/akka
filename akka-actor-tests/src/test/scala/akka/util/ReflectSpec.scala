@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2014-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2014-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.util
 
 import org.scalatest.{ Matchers, WordSpec }
@@ -11,8 +12,8 @@ object ReflectSpec {
   final class A
   final class B
 
-  class One(a: A)
-  class Two(a: A, b: B)
+  class One(@unused a: A)
+  class Two(@unused a: A, @unused b: B)
 
   class MultipleOne(a: A, b: B) {
     def this(a: A) { this(a, null) }

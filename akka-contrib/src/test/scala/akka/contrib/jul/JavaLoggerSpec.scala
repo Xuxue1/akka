@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.contrib.jul
 
 import com.typesafe.config.ConfigFactory
@@ -31,12 +32,12 @@ class JavaLoggerSpec extends AkkaSpec(JavaLoggerSpec.config) {
   val logger = logging.Logger.getLogger("akka://JavaLoggerSpec/user/log")
   logger.setUseParentHandlers(false) // turn off output of test LogRecords
   logger.addHandler(new logging.Handler {
-    def publish(record: logging.LogRecord) {
+    def publish(record: logging.LogRecord): Unit = {
       testActor ! record
     }
 
-    def flush() {}
-    def close() {}
+    def flush(): Unit = {}
+    def close(): Unit = {}
   })
 
   val producer = system.actorOf(Props[JavaLoggerSpec.LogProducer], name = "log")

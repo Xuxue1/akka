@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.camel
@@ -18,12 +18,12 @@ trait ProducerSupport extends Actor with CamelSupport {
   private[this] var messages = Vector.empty[(ActorRef, Any)]
   private[this] var producerChild: Option[ActorRef] = None
 
-  override def preStart() {
+  override def preStart(): Unit = {
     super.preStart()
     register()
   }
 
-  private[this] def register() { camel.supervisor ! Register(self, endpointUri) }
+  private[this] def register(): Unit = { camel.supervisor ! Register(self, endpointUri) }
 
   /**
    * CamelMessage headers to copy by default from request message to response-message.
@@ -59,7 +59,11 @@ trait ProducerSupport extends Actor with CamelSupport {
   protected def produce: Receive = {
     case CamelProducerObjects(endpoint, processor) ⇒
       if (producerChild.isEmpty) {
-        producerChild = Some(context.actorOf(Props(new ProducerChild(endpoint, processor))))
+        val disp = camel.settings.ProducerChildDispatcher match {
+          case "" ⇒ context.props.dispatcher
+          case d  ⇒ d
+        }
+        producerChild = Some(context.actorOf(Props(new ProducerChild(endpoint, processor)).withDispatcher(disp)))
         messages = {
           for (
             child ← producerChild;
@@ -128,7 +132,7 @@ trait ProducerSupport extends Actor with CamelSupport {
     protected def produce(endpoint: Endpoint, processor: SendProcessor, msg: Any, pattern: ExchangePattern): Unit = {
       // Need copies of sender reference here since the callback could be done
       // later by another thread.
-      val producer = self
+      val producer = context.parent
       val originalSender = sender()
       val xchg = new CamelExchangeAdapter(endpoint.createExchange(pattern))
       val cmsg = CamelMessage.canonicalize(msg)
@@ -146,6 +150,7 @@ trait ProducerSupport extends Actor with CamelSupport {
 /**
  * Mixed in by Actor implementations to produce messages to Camel endpoints.
  */
+@deprecated("Akka Camel is deprecated in favour of 'Alpakka', the Akka Streams based collection of integrations to various endpoints (including Camel).", since = "2.5.0")
 trait Producer extends ProducerSupport { this: Actor ⇒
 
   /**
@@ -170,6 +175,7 @@ private final case class FailureResult(cause: Throwable, headers: Map[String, An
  *
  *
  */
+@deprecated("Akka Camel is deprecated in favour of 'Alpakka', the Akka Streams based collection of integrations to various endpoints (including Camel).", since = "2.5.0")
 trait Oneway extends Producer { this: Actor ⇒
   override def oneway: Boolean = true
 }

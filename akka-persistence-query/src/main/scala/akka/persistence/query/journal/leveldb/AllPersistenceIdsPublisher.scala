@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2015-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2015-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.persistence.query.journal.leveldb
 
 import akka.actor.ActorLogging
@@ -26,6 +27,7 @@ private[akka] object AllPersistenceIdsPublisher {
 /**
  * INTERNAL API
  */
+// FIXME needs a be rewritten as a GraphStage (since 2.5.0)
 private[akka] class AllPersistenceIdsPublisher(liveQuery: Boolean, maxBufSize: Int, writeJournalPluginId: String)
   extends ActorPublisher[String] with DeliveryBuffer[String] with ActorLogging {
 

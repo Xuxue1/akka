@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.remote
 
 import language.postfixOps
@@ -12,10 +13,7 @@ import akka.actor.Actor
 import akka.actor.ActorSystemImpl
 import akka.actor.Props
 import akka.remote.testkit.MultiNodeConfig
-import akka.remote.testkit.MultiNodeSpec
-import akka.remote.testkit.STMultiNodeSpec
 import akka.testkit._
-import akka.testkit.TestEvent._
 
 class RemoteDeploymentDeathWatchMultiJvmSpec(artery: Boolean) extends MultiNodeConfig {
   val first = role("first")
@@ -27,7 +25,7 @@ class RemoteDeploymentDeathWatchMultiJvmSpec(artery: Boolean) extends MultiNodeC
       akka.loglevel = INFO
       akka.remote.log-remote-lifecycle-events = off
       akka.remote.artery.enabled = $artery
-      """)).withFallback(RemotingMultiNodeSpec.arteryFlightRecordingConf))
+      """)).withFallback(RemotingMultiNodeSpec.commonConfig))
 
   deployOn(second, """/hello.remote = "@third@" """)
 

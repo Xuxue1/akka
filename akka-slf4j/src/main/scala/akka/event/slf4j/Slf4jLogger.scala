@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.event.slf4j
@@ -7,12 +7,9 @@ package akka.event.slf4j
 import org.slf4j.{ MDC, Marker, MarkerFactory, Logger ⇒ SLFLogger, LoggerFactory ⇒ SLFLoggerFactory }
 import akka.event.Logging._
 import akka.actor._
-import akka.event.DummyClassForStringSources
+import akka.event.{ LogMarker, _ }
 import akka.util.Helpers
-import akka.event.LoggingFilter
-import akka.event.EventStream
 import akka.dispatch.RequiresMessageQueue
-import akka.event.LoggerMessageQueueSemantics
 
 /**
  * Base trait for all classes that wants to be able use the SLF4J logging infrastructure.
@@ -75,7 +72,10 @@ class Slf4jLogger extends Actor with SLF4JLogging with RequiresMessageQueue[Logg
 
     case event @ Warning(logSource, logClass, message) ⇒
       withMdc(logSource, event) {
-        Logger(logClass, logSource).warn(markerIfPresent(event), "{}", message.asInstanceOf[AnyRef])
+        event match {
+          case e: LogEventWithCause ⇒ Logger(logClass, logSource).warn(markerIfPresent(event), if (message != null) message.toString else e.cause.getLocalizedMessage, e.cause)
+          case _                    ⇒ Logger(logClass, logSource).warn(markerIfPresent(event), if (message != null) message.toString else null)
+        }
       }
 
     case event @ Info(logSource, logClass, message) ⇒
@@ -94,7 +94,7 @@ class Slf4jLogger extends Actor with SLF4JLogging with RequiresMessageQueue[Logg
   }
 
   @inline
-  final def withMdc(logSource: String, logEvent: LogEvent)(logStatement: ⇒ Unit) {
+  final def withMdc(logSource: String, logEvent: LogEvent)(logStatement: ⇒ Unit): Unit = {
     MDC.put(mdcAkkaSourceAttributeName, logSource)
     MDC.put(mdcThreadAttributeName, logEvent.thread.getName)
     MDC.put(mdcAkkaTimestamp, formatTimestamp(logEvent.timestamp))
@@ -111,8 +111,13 @@ class Slf4jLogger extends Actor with SLF4JLogging with RequiresMessageQueue[Logg
 
   private final def markerIfPresent(event: LogEvent): Marker =
     event match {
-      case m: LogEventWithMarker ⇒ MarkerFactory.getMarker(m.marker.name)
-      case _                     ⇒ null
+      case m: LogEventWithMarker ⇒
+        m.marker match {
+          case null                        ⇒ null
+          case slf4jMarker: Slf4jLogMarker ⇒ slf4jMarker.marker
+          case marker                      ⇒ MarkerFactory.getMarker(marker.name)
+        }
+      case _ ⇒ null
     }
 
   /**
@@ -140,4 +145,15 @@ class Slf4jLoggingFilter(settings: ActorSystem.Settings, eventStream: EventStrea
     (eventStream.logLevel >= InfoLevel) && Logger(logClass, logSource).isInfoEnabled
   def isDebugEnabled(logClass: Class[_], logSource: String) =
     (eventStream.logLevel >= DebugLevel) && Logger(logClass, logSource).isDebugEnabled
+}
+
+/** Wraps [[org.slf4j.Marker]] */
+final class Slf4jLogMarker(val marker: org.slf4j.Marker) extends LogMarker(name = marker.getName)
+
+/** Factory for creating [[LogMarker]] that wraps [[org.slf4j.Marker]] */
+object Slf4jLogMarker {
+  def apply(marker: org.slf4j.Marker): Slf4jLogMarker = new Slf4jLogMarker(marker)
+
+  /** Java API */
+  def create(marker: org.slf4j.Marker): Slf4jLogMarker = apply(marker)
 }

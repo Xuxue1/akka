@@ -1,20 +1,20 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.routing
 
 import java.time.LocalDateTime
 
 import scala.collection.immutable
 import java.util.concurrent.ThreadLocalRandom
+
 import scala.concurrent.duration._
-
 import com.typesafe.config.Config
-
 import akka.actor._
 import akka.util.JavaDurationConverters._
-
 import OptimalSizeExploringResizer._
+import akka.annotation.InternalApi
 
 trait OptimalSizeExploringResizer extends Resizer {
   /**
@@ -32,7 +32,7 @@ case object OptimalSizeExploringResizer {
   /**
    * INTERNAL API
    */
-  private[routing]type PoolSize = Int
+  private[routing] type PoolSize = Int
 
   /**
    * INTERNAL API
@@ -51,7 +51,7 @@ case object OptimalSizeExploringResizer {
   /**
    * INTERNAL API
    */
-  private[routing]type PerformanceLog = Map[PoolSize, Duration]
+  private[routing] type PerformanceLog = Map[PoolSize, Duration]
 
   def apply(resizerCfg: Config): OptimalSizeExploringResizer =
     DefaultOptimalSizeExploringResizer(
@@ -126,17 +126,26 @@ case class DefaultOptimalSizeExploringResizer(
   explorationProbability:                         Double   = 0.4,
   weightOfLatestMetric:                           Double   = 0.5) extends OptimalSizeExploringResizer {
   /**
+   * INTERNAL API
+   *
    * Leave package accessible for testing purpose
    */
+  @InternalApi
   private[routing] var performanceLog: PerformanceLog = Map.empty
   /**
+   * INTERNAL API
+   *
    * Leave package accessible for testing purpose
    */
+  @InternalApi
   private[routing] var record: ResizeRecord = ResizeRecord()
 
   /**
+   * INTERNAL API
+   *
    * Leave package accessible for testing purpose
    */
+  @InternalApi
   private[routing] var stopExploring = false
 
   private def random = ThreadLocalRandom.current()
@@ -185,7 +194,7 @@ case class DefaultOptimalSizeExploringResizer(
             cell.mailbox.numberOfMessages + (if (cell.currentMessage != null) 1 else 0)
           case cell ⇒ cell.numberOfMessages
         }
-      case x ⇒ 0
+      case _ ⇒ 0
     }
 
     val totalQueueLength = messagesInRoutees.sum

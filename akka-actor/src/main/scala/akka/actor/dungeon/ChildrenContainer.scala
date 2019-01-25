@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.actor.dungeon
@@ -49,13 +49,13 @@ private[akka] object ChildrenContainer {
   final case class Creation() extends SuspendReason with WaitingForChildren
   case object Termination extends SuspendReason
 
-  class ChildRestartsIterable(stats: immutable.MapLike[_, ChildStats, _]) extends PartialImmutableValuesIterable[ChildStats, ChildRestartStats] {
+  class ChildRestartsIterable(stats: immutable.Map[_, ChildStats]) extends PartialImmutableValuesIterable[ChildStats, ChildRestartStats] {
     override final def apply(c: ChildStats) = c.asInstanceOf[ChildRestartStats]
     override final def isDefinedAt(c: ChildStats) = c.isInstanceOf[ChildRestartStats]
     override final def valuesIterator = stats.valuesIterator
   }
 
-  class ChildrenIterable(stats: immutable.MapLike[_, ChildStats, _]) extends PartialImmutableValuesIterable[ChildStats, ActorRef] {
+  class ChildrenIterable(stats: immutable.Map[_, ChildStats]) extends PartialImmutableValuesIterable[ChildStats, ActorRef] {
     override final def apply(c: ChildStats) = c.asInstanceOf[ChildRestartStats].child
     override final def isDefinedAt(c: ChildStats) = c.isInstanceOf[ChildRestartStats]
     override final def valuesIterator = stats.valuesIterator
@@ -126,7 +126,7 @@ private[akka] object ChildrenContainer {
 
     override def reserve(name: String): ChildrenContainer =
       if (c contains name)
-        throw new InvalidActorNameException(s"actor name [$name] is not unique!")
+        throw InvalidActorNameException(s"actor name [$name] is not unique!")
       else new NormalChildrenContainer(c.updated(name, ChildNameReserved))
 
     override def unreserve(name: String): ChildrenContainer = c.get(name) match {
@@ -188,7 +188,7 @@ private[akka] object ChildrenContainer {
       case Termination ⇒ throw new IllegalStateException("cannot reserve actor name '" + name + "': terminating")
       case _ ⇒
         if (c contains name)
-          throw new InvalidActorNameException(s"actor name [$name] is not unique!")
+          throw InvalidActorNameException(s"actor name [$name] is not unique!")
         else copy(c = c.updated(name, ChildNameReserved))
     }
 

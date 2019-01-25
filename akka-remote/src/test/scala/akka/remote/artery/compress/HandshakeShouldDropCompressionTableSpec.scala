@@ -1,17 +1,16 @@
 /*
- * Copyright (C) 2016 Lightbend Inc. <http://www.lightbend.com>
+ * Copyright (C) 2016-2019 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.remote.artery.compress
 
-import akka.actor.{ ActorIdentity, ActorRef, ActorSystem, Identify }
-import akka.remote.artery.compress.CompressionProtocol.Events
-import akka.testkit._
-import akka.util.Timeout
+import akka.actor.{ ActorIdentity, ActorSystem, Identify }
 import akka.pattern.ask
 import akka.remote.RARP
-import akka.remote.artery.ArteryTransport
 import akka.remote.artery.compress.CompressionProtocol.Events.{ Event, ReceivedActorRefCompressionTable }
+import akka.remote.artery.{ ArteryMultiNodeSpec, ArterySpecSupport, ArteryTransport }
+import akka.testkit._
+import akka.util.Timeout
 import com.typesafe.config.ConfigFactory
 import org.scalatest.BeforeAndAfter
 
@@ -19,17 +18,8 @@ import scala.concurrent.Await
 import scala.concurrent.duration._
 
 object HandshakeShouldDropCompressionTableSpec {
-  // need the port before systemB is started
-  val portB = SocketUtil.temporaryServerAddress("localhost", udp = true).getPort
-
   val commonConfig = ConfigFactory.parseString(s"""
      akka {
-       loglevel = INFO
-
-       actor.provider = remote
-       remote.artery.enabled = on
-       remote.artery.canonical.hostname = localhost
-       remote.artery.canonical.port = 0
        remote.artery.advanced.handshake-timeout = 10s
        remote.artery.advanced.image-liveness-timeout = 7s
 
@@ -40,22 +30,21 @@ object HandshakeShouldDropCompressionTableSpec {
          }
        }
      }
-  """)
-
-  val configB = ConfigFactory.parseString(s"akka.remote.artery.canonical.port = $portB")
-    .withFallback(commonConfig)
+  """).withFallback(ArterySpecSupport.defaultConfig)
 
 }
 
-class HandshakeShouldDropCompressionTableSpec extends AkkaSpec(HandshakeShouldDropCompressionTableSpec.commonConfig)
+class HandshakeShouldDropCompressionTableSpec extends ArteryMultiNodeSpec(HandshakeShouldDropCompressionTableSpec.commonConfig)
   with ImplicitSender with BeforeAndAfter {
-  import HandshakeShouldDropCompressionTableSpec._
 
   implicit val t = Timeout(3.seconds)
   var systemB: ActorSystem = null
+  val portB = freePort()
 
   before {
-    systemB = ActorSystem("systemB", configB)
+    systemB = newRemoteSystem(
+      name = Some("systemB"),
+      extraConfig = Some(s"akka.remote.artery.canonical.port = $portB"))
   }
 
   "Outgoing compression table" must {
@@ -92,11 +81,13 @@ class HandshakeShouldDropCompressionTableSpec extends AkkaSpec(HandshakeShouldDr
       info("System [A] received: " + a1)
       a1.table.dictionary.keySet should contain(a1Probe.ref)
 
-      log.warning("SHUTTING DOWN system {}...", systemB)
+      log.info("SHUTTING DOWN system {}...", systemB)
       shutdown(systemB)
-      systemB = ActorSystem("systemB", configB)
+      systemB = newRemoteSystem(
+        name = Some("systemB"),
+        extraConfig = Some(s"akka.remote.artery.canonical.port = $portB"))
       Thread.sleep(1000)
-      log.warning("SYSTEM READY {}...", systemB)
+      log.info("SYSTEM READY {}...", systemB)
 
       val aNewProbe = TestProbe()
       system.eventStream.subscribe(aNewProbe.ref, classOf[Event])
@@ -138,14 +129,4 @@ class HandshakeShouldDropCompressionTableSpec extends AkkaSpec(HandshakeShouldDr
     ref.get
   }
 
-  after {
-    shutdownAllActorSystems()
-  }
-
-  override def afterTermination(): Unit =
-    shutdownAllActorSystems()
-
-  private def shutdownAllActorSystems(): Unit = {
-    if (systemB != null) shutdown(systemB)
-  }
 }

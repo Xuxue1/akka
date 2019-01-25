@@ -1,6 +1,7 @@
-/**
- * Copyright (C) 2009-2016 Lightbend Inc. <http://www.lightbend.com>
+/*
+ * Copyright (C) 2009-2019 Lightbend Inc. <https://www.lightbend.com>
  */
+
 package akka.testkit
 
 import language.postfixOps
@@ -49,7 +50,7 @@ private[testkit] class CallingThreadDispatcherQueues extends Extension {
 
   // we have to forget about long-gone threads sometime
   private def gc(): Unit = {
-    queues = (Map.newBuilder[CallingThreadMailbox, Set[WeakReference[MessageQueue]]] /: queues) {
+    queues = queues.foldLeft(Map.newBuilder[CallingThreadMailbox, Set[WeakReference[MessageQueue]]]) {
       case (m, (k, v)) ⇒
         val nv = v filter (_.get ne null)
         if (nv.isEmpty) m else m += (k → nv)
@@ -136,7 +137,7 @@ class CallingThreadDispatcher(_configurator: MessageDispatcherConfigurator) exte
   protected[akka] override def createMailbox(actor: akka.actor.Cell, mailboxType: MailboxType) =
     new CallingThreadMailbox(actor, mailboxType)
 
-  protected[akka] override def shutdown() {}
+  protected[akka] override def shutdown(): Unit = {}
 
   protected[akka] override def throughput = 0
   protected[akka] override def throughputDeadlineTime = Duration.Zero
@@ -163,14 +164,14 @@ class CallingThreadDispatcher(_configurator: MessageDispatcherConfigurator) exte
     mbox foreach CallingThreadDispatcherQueues(actor.system).unregisterQueues
   }
 
-  protected[akka] override def suspend(actor: ActorCell) {
+  protected[akka] override def suspend(actor: ActorCell): Unit = {
     actor.mailbox match {
       case m: CallingThreadMailbox ⇒ { m.suspendSwitch.switchOn; m.suspend() }
       case m                       ⇒ m.systemEnqueue(actor.self, Suspend())
     }
   }
 
-  protected[akka] override def resume(actor: ActorCell) {
+  protected[akka] override def resume(actor: ActorCell): Unit = {
     actor.mailbox match {
       case mbox: CallingThreadMailbox ⇒
         val queue = mbox.queue
@@ -184,7 +185,7 @@ class CallingThreadDispatcher(_configurator: MessageDispatcherConfigurator) exte
     }
   }
 
-  protected[akka] override def systemDispatch(receiver: ActorCell, message: SystemMessage) {
+  protected[akka] override def systemDispatch(receiver: ActorCell, message: SystemMessage): Unit = {
     receiver.mailbox match {
       case mbox: CallingThreadMailbox ⇒
         mbox.systemEnqueue(receiver.self, message)
@@ -193,7 +194,7 @@ class CallingThreadDispatcher(_configurator: MessageDispatcherConfigurator) exte
     }
   }
 
-  protected[akka] override def dispatch(receiver: ActorCell, handle: Envelope) {
+  protected[akka] override def dispatch(receiver: ActorCell, handle: Envelope): Unit = {
     receiver.mailbox match {
       case mbox: CallingThreadMailbox ⇒
         val queue = mbox.queue
@@ -209,7 +210,7 @@ class CallingThreadDispatcher(_configurator: MessageDispatcherConfigurator) exte
     }
   }
 
-  protected[akka] override def executeTask(invocation: TaskInvocation) { invocation.run }
+  protected[akka] override def executeTask(invocation: TaskInvocation): Unit = { invocation.run }
 
   /*
    * This method must be called with this thread's queue.
@@ -219,7 +220,7 @@ class CallingThreadDispatcher(_configurator: MessageDispatcherConfigurator) exte
    * it is suspendSwitch and resumed.
    */
   @tailrec
-  private def runQueue(mbox: CallingThreadMailbox, queue: MessageQueue, interruptedEx: InterruptedException = null) {
+  private def runQueue(mbox: CallingThreadMailbox, queue: MessageQueue, interruptedEx: InterruptedException = null): Unit = {
     def checkThreadInterruption(intEx: InterruptedException): InterruptedException = {
       if (Thread.interrupted()) { // clear interrupted flag before we continue, exception will be thrown later
         val ie = new InterruptedException("Interrupted during message processing")
